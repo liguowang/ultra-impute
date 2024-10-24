@@ -1,3 +1,5 @@
+src/UltraImpute.egg-inf/*
+src/__pycache__/*
 dist/*
 build/*
 test/*
