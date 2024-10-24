@@ -1,0 +1,45 @@
+#Declaring the build backend
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+#Project's meta data
+[project]
+version = "1.0.0"
+name = "UltraImpute"
+authors = [
+  {name="Liguo Wang", email="wangliguo78@gmail.com"},
+]
+maintainers = [
+  {name = "Liguo Wang", email = "wangliguo78@gmail.com"}
+]
+description = "Missing value imputation tookit."
+readme = "README.md"
+license = {file = "LICENSE"}
+requires-python = ">=3.5"
+
+dependencies = [
+	"numpy",
+	"pandas",
+	"scipy",
+	"scikit-learn",
+	"fancyimpute",
+]
+
+classifiers=[
+	"Programming Language :: Python :: 3",
+	'Development Status :: 4 - Beta',
+	"License :: OSI Approved :: MIT License",
+	'Environment :: Console',
+	'Intended Audience :: Science/Research',
+	'Operating System :: MacOS :: MacOS X',
+	'Operating System :: POSIX',
+	'Topic :: Scientific/Engineering :: Bio-Informatics',
+]
+
+keywords = ["missing value", "NA", "imputation", "impute"]
+
+[project.urls]
+Documentation = "https://cpgtools.readthedocs.io/en/latest/index.html"
+Repository = "https://github.com/liguowang/cpgtools.git"
+

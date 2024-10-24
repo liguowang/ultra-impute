@@ -1,0 +1,1151 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Created on Thu Oct  3 21:22:56 2024
+@author: Liguo Wang (WangLiguo78@Gmail.com)
+"""
+import sys
+import numpy as np
+import pandas as pd
+from impyutelib import nan_indices, apply_method, random_impute, moving_window
+from impyutelib import fKNN, em, buck_iterative, external_ref
+from fancyimpute import NuclearNormMinimization, SoftImpute, IterativeSVD
+from fancyimpute import IterativeImputer, MatrixFactorization
+from misspylib import MissForest
+from sklearn.impute import KNNImputer
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.multioutput import MultiOutputRegressor
+from sklearn.model_selection import train_test_split
+
+__all__ = ["MissFiller"]
+
+class MissFiller:
+    
+    def __init__(self, data, prefix=None):
+        """
+        The input must be one of the following types: pd.DataFrame, np.ndarray,
+        or dict of lists.
+        
+        Parameters
+        ----------
+        prefix : str
+            Prefix to be added to column names. This is only applicable when
+            the input is an np.ndarray
+            
+        Examples
+        --------
+        >>> import numpy as np
+        >>> import pandas as pd
+        >>> from missfiller import MissFiller
+        >>>
+        >>> d1 = {
+        ... 'First':[100, 90, np.nan, 95],
+        ... 'Second': [30, 45, 56, np.nan],
+        ... 'Third':[np.nan, 40, 80, 98]
+        ... }
+        >>> d = MissFiller(d1)
+        >>> d.df
+               First  Second  Third
+            0  100.0    30.0    NaN
+            1   90.0    45.0   40.0
+            2    NaN    56.0   80.0
+            3   95.0     NaN   98.0
+        >>>
+        >>> d2 = np.array([
+        ... [ 0.,  1., np.nan,  3.],
+        ... [ 5.,  6.,  7.,  8.],
+        ... [10., np.nan, 12., 13.],
+        ... [15., 16., 17., 18.],
+        ... [20., 21., 22., 23.]
+        ... ])
+        >>> d = MissFiller(d2)
+        >>> d.df
+                  0     1     2     3
+            0   0.0   1.0   NaN   3.0
+            1   5.0   6.0   7.0   8.0
+            2  10.0   NaN  12.0  13.0
+            3  15.0  16.0  17.0  18.0
+            4  20.0  21.0  22.0  23.0
+        >>>
+        >>>d3 = pd.read_csv('test_data.withNA.tsv', header='infer', index_col=0, sep=None, engine='python')
+        >>> d3
+                        TCGA-BC-A10Q  TCGA-BC-A10R  TCGA-BC-A10S  TCGA-BC-A10T  TCGA-BC-A10U
+            cg_ID
+            cg00000029        0.3469        0.3870        0.3428        0.3064        0.3939
+            cg00000165           NaN        0.1656        0.1212        0.1171        0.1626
+            cg00000236        0.8479           NaN        0.8647        0.8918        0.8674
+        >>>d = MissFiller(d3)
+        """
+        if isinstance(data, pd.DataFrame):
+            self.df = data
+        elif isinstance(data, np.ndarray) and data.ndim == 2:
+            if prefix is None or len(prefix) == 0:
+                self.df = pd.DataFrame(data)
+            else:
+                ncols = data.shape[1]
+                colNames = [prefix + str(i).zfill(len(str(ncols))) for i in range(0, ncols)]
+                self.df = pd.DataFrame(data, columns=colNames)
+        elif isinstance(data, dict) and isinstance(next(iter(data.values())), list):
+            self.df = pd.DataFrame(data)
+        else:
+            raise Exception("Not a valid input. Acceptes pd.DataFrame, np.ndarray or dict.")
+        self.nrow = self.df.shape[0]
+        self.ncol = self.df.shape[1]
+        self.size = self.df.size
+        self.dimension = self.df.shape
+        self.row_ids = self.df.index
+        self.col_ids = self.df.columns
+        self.na_count = int(self.df.isna().sum().sum())
+
+
+    def __str__(self):
+        return "DataFrame with %d rows and %d columns." % self.df.shape
+
+
+    def get_dataframe(self):
+        """
+        Returns pd.DataFrame object.
+        
+        Returns
+        -------
+        pd.DataFrame
+        """
+        return self.df
+
+
+    def get_na_indices(self):
+        """
+        Returns the coordinates (x, y) of the missing values.
+
+        Examples
+        --------
+        >>> d1 = {
+        ... 'First':[100, 90, np.nan, 95],
+        ... 'Second': [30, 45, 56, np.nan],
+        ... 'Third':[np.nan, 40, 80, 98]
+        ... }
+        >>> d = MissFiller(d1)
+        >>> d.df
+               First  Second  Third
+            0  100.0    30.0    NaN
+            1   90.0    45.0   40.0
+            2    NaN    56.0   80.0
+            3   95.0     NaN   98.0
+        >>> d.get_na_indices()
+            array([[0, 2],
+                   [2, 0],
+                   [3, 1]])
+
+        Returns
+        -------
+        List of list.
+        """
+        return nan_indices(self.df.to_numpy())
+
+
+    def count_na(self):
+        """
+        Counts the total number of missing values in the DataFrame.
+        
+        Returns
+        -------
+        int
+            Total number of missing values.
+        """
+        return self.df.isna().sum().sum()
+
+
+    def count_row_na(self):
+        """
+        Counts the number of missing values for each row.
+
+        Examples
+        --------
+        >>> d1 = {
+        ... 'First':[100, 90, np.nan, 95],
+        ... 'Second': [30, 45, 56, np.nan],
+        ... 'Third':[np.nan, 40, 80, 98]
+        ... }
+        >>> d = MissFiller(d1)
+        >>> d.df
+               First  Second  Third
+            0  100.0    30.0    NaN
+            1   90.0    45.0   40.0
+            2    NaN    56.0   80.0
+            3   95.0     NaN   98.0
+        >>> d.count_row_na()
+            0    1
+            1    0
+            2    1
+            3    1
+            dtype: int64
+        >>> d.count_col_na()
+            First     1
+            Second    1
+            Third     1
+            dtype: int64
+
+        Returns
+        -------
+        pd.Series
+            Number of missing values per row.
+        """
+        return self.df.isna().sum(axis=1)
+
+
+    def count_col_na(self):
+        """
+        Counts the number of missing values for each column.
+        
+        Returns
+        -------
+        pd.Series
+            Number of missing values per column.
+        """
+        return self.df.isna().sum(axis=0)
+
+
+    def remove_na(self, n_non_miss='all', axis=0):
+        """
+        Remove missing values.
+        
+        Parameters
+        ----------
+        axis : {0 , 1}
+            0: remove rows with missing values.
+            1: remove columns with missing values. 
+            Default is 0.
+
+        n_non_miss : {'all', float}
+            Specifies the required number of non-missing values.
+            If 0 < n_non_miss < 1, it is interpreted as a fraction. For
+            example, if n_non_miss = 0.85, rows or columns with up to 15%
+            missing values will be removed.
+
+        Examples
+        --------
+        >>> d1 = {
+        ... 'First':[100, 90, np.nan, 95],
+        ... 'Second': [30, 45, 56, np.nan],
+        ... 'Third':[np.nan, 40, 80, 98]
+        ... }
+        >>> d = MissFiller(d1)
+        >>> d.df
+               First  Second  Third
+            0  100.0    30.0    NaN
+            1   90.0    45.0   40.0
+            2    NaN    56.0   80.0
+            3   95.0     NaN   98.0
+        >>> d.remove_na()
+               First  Second  Third
+            1   90.0    45.0   40.0
+        >>> d.remove_na(axis=1)
+            Empty DataFrame
+            Columns: []
+            Index: [0, 1, 2, 3]
+
+        Returns
+        -------
+        pd.DataFrame
+        """
+        if n_non_miss == 'all':
+            if axis == 0:
+                n_non_miss = self.ncol
+            elif axis == 1:
+                n_non_miss = self.nrow
+        elif n_non_miss > 0 and n_non_miss < 1:
+            if axis == 0:
+                n_non_miss = n_non_miss * self.ncol
+            elif axis == 1:
+                n_non_miss = n_non_miss * self.nrow
+        else:
+            raise ValueError("Invalid value.")
+        
+        return self.df.dropna(axis=axis, thresh = int(n_non_miss))
+
+
+    def insert_na(self, n_miss, seed=123):
+        """
+        Insert missing values into the existing DataFrame. If n_miss = 100 
+        and the DataFrame already has more than 100 missing values (NAs), 
+        the function will return the original DataFrame unchanged. If 
+        n_miss = 100 and the DataFrame has 20 NAs, the function will insert 
+        80 additional NAs into random locations.
+        
+        Parameters
+        ----------
+        n_miss : int
+            Number of missign values inserted into the dataframe.
+
+        seed : int
+            Seed to initiate a random number generator.
+        
+        Returns
+        -------
+        pd.DataFrame
+        
+        Examples
+        --------
+            >>> dat = np.array([
+            ... [ 0.,  1., np.nan,  3.,  4.],
+            ... [ 5.,  6.,  7.,  8.,  9.],
+            ... [10., 11., 12., 13., 14.],
+            ... [15., 16., 17., 18., 19.],
+            ... [20., 21., 22., 23., 24.]
+            ... ])
+            >>>
+            >>> d = MissFiller(dat)
+            >>> d.insert_na(n_miss = 5)
+            
+                s_0   s_1   s_2   s_3   s_4
+            0   0.0   1.0   NaN   3.0   4.0
+            1   5.0   6.0   7.0   8.0   9.0
+            2  10.0   NaN  12.0  13.0   NaN
+            3  15.0   NaN   NaN  18.0  19.0
+            4  20.0  21.0  22.0  23.0  24.0
+        """
+        np.random.seed(seed)
+        input_df = self.df.copy()
+        nrow,ncol = self.nrow, self.ncol
+        previous_na_count = self.na_count
+        if n_miss <= 0:
+            return input_df
+        elif n_miss <= previous_na_count:
+            return input_df
+        elif n_miss >= nrow*ncol:
+            out_df = input_df.replace(input_df.values, np.nan)
+        else:
+            na_count = 0
+            n_miss_needed = int(n_miss - previous_na_count)
+            tmp = input_df.to_numpy()
+            while(1):
+                if na_count >= n_miss_needed:
+                    break
+                x = np.random.choice(nrow)
+                y = np.random.choice(ncol)
+                if not np.isnan(tmp[x][y]):
+                    tmp[x][y] = np.nan
+                    na_count += 1
+            out_df = pd.DataFrame(
+                tmp, index=input_df.index, columns=input_df.columns)
+        return out_df
+
+
+    def replace_na(self, value, axis=None):
+        """
+        Replaces missing values with a specified value (can be an integer,
+        float, or string).
+        
+        Returns
+        -------
+        pd.DataFrame
+        """
+        return self.df.fillna(value, axis=axis)
+
+
+    def fill_trend(self, axis=0, method='mean'):
+        """
+        Replaces missing values with one of the following: 'min', 'max',
+        'mean', 'median', 'bfill' (backfill), or 'ffill' (forward fill).
+
+        
+        Parameters
+        ----------
+        axis : {0, 1}
+            0: calculate mean/median/min/max or find the forward-fill/back-fill
+               value along the columns 
+            1: calculate mean/median/min/max or find the forward-fill/back-fill
+               value along the rows.
+            The default is 0.
+
+        method : {'mean', 'median', 'min', 'max', 'bfill', 'ffill'}
+            mean, median, min, max: 
+                refers to pandas's documentations.
+            bfill (back fill): Fills a missing value with the next value.
+                If axis=0, "next" refers to the value directly below the 
+                missing value. As a result, missing values at the bottom of 
+                the column will not be filled.
+                If axis=1, "next" refers to the value to the right of the 
+                missing value. Consequently, missing values on the rightmost 
+                side of the row will not be filled.
+            ffill (forward fill): Fills a missing value with the previous value.
+                If axis=0, "previous" refers to the value directly above the 
+                missing value. Therefore, missing values at the top of the 
+                column will not be filled.
+                If axis=1, "previous" refers to the value to the left of the 
+                missing value. Thus, missing values on the leftmost side of 
+                the row will not be filled.
+
+        Examples
+        --------
+        >>> d1 = {
+        ... 'First':[100, 90, np.nan, 95],
+        ... 'Second': [30, 45, 56, np.nan],
+        ... 'Third':[np.nan, 40, 80, 98]
+        ... }
+        >>> d = MissFiller(d1)
+        >>> d.df
+               First  Second  Third
+            0  100.0    30.0    NaN
+            1   90.0    45.0   40.0
+            2    NaN    56.0   80.0
+            3   95.0     NaN   98.0
+        >>> d.fill_trend(method='mean')
+               First     Second      Third
+            0  100.0  30.000000  72.666667
+            1   90.0  45.000000  40.000000
+            2   95.0  56.000000  80.000000
+            3   95.0  43.666667  98.000000
+        >>> d.fill_trend(method='mean', axis=1)
+               First  Second  Third
+            0  100.0    30.0   65.0
+            1   90.0    45.0   40.0
+            2   68.0    56.0   80.0
+            3   95.0    96.5   98.0
+        >>> d.fill_trend(method='bfill')
+               First  Second  Third
+            0  100.0    30.0   40.0
+            1   90.0    45.0   40.0
+            2   95.0    56.0   80.0
+            3   95.0     NaN   98.0
+
+        Returns
+        -------
+        pd.DataFrame
+        """
+        if axis == 0:
+            input_df = self.df
+            tmp = apply_method(input_df, method)
+            out_df = input_df.fillna(tmp)
+        elif axis == 1:
+            input_df = self.df.T
+            tmp = apply_method(input_df, method)
+            out_df = input_df.fillna(tmp).T
+        return out_df
+
+
+    def fill_rand(self, axis=0):
+        """
+        Replaces missing values with random values selected from the
+        corresponding row or column.
+        
+        Parameters
+        ----------
+        axis : {0, 1}
+            0: chosen a random value from the column.
+            1: chosen a random value from the row.
+            Default is 0.
+
+        Examples
+        --------
+        >>> d1 = {
+        ... 'First':[100, 90, np.nan, 95],
+        ... 'Second': [30, 45, 56, np.nan],
+        ... 'Third':[np.nan, 40, 80, 98]
+        ... }
+        >>> d = MissFiller(d1)
+        >>> d.df
+               First  Second  Third
+            0  100.0    30.0    NaN
+            1   90.0    45.0   40.0
+            2    NaN    56.0   80.0
+            3   95.0     NaN   98.0
+        >>> d.fill_rand()
+               First  Second  Third
+            0  100.0    30.0   80.0
+            1   90.0    45.0   40.0
+            2   90.0    56.0   80.0
+            3   95.0    30.0   98.0
+
+        Returns
+        -------
+        pd.DataFrame
+        """
+        if axis == 0:
+            input_df = self.df
+            return random_impute(input_df)
+        elif axis == 1:
+            input_df = self.df.T
+            return random_impute(input_df).T
+
+
+    def fill_mw(self, axis=0, nindex=None, wsize=5, errors="coerce", 
+                func=np.mean):
+        """
+        Replaces missing values with values calculated from moving windows
+        along rows or columns.
+        
+        Parameters
+        ----------
+
+        axis : {0, 1}
+            0: Apply moving windows along the columns.
+            1: Apply moving windows along the rows.
+            Default is 0.
+
+        nindex: int
+            Null index. Index of the missing value inside the moving average
+            window. This is useful if you wanted to make the imputed value
+            skewed toward the left or right side. 
+            0:  only take the average of values from the right side of the
+                missing value.
+            -1: only take the average of values from the left side of the
+                missing value.
+
+        wsize: int
+            Size of the moving average window/area of values being used
+            for each local imputation. This number includes the missing value.
+
+        errors: {"raise", "coerce", "ignore"}
+            Errors will occur with the indexing of the windows - for example 
+            if there is a nan at data[x][0] and `nindex` is set to -1 or there
+            is a nan at data[x][-1] and `nindex` is set to 0. `"raise"` will
+            raise an error, `"coerce"` will try again using an nindex set to
+            the middle and `"ignore"` will just leave it as a nan.
+
+        Examples
+        --------
+        >>> d1 = {
+        ... 'First':[100, 90, np.nan, 95],
+        ... 'Second': [30, 45, 56, np.nan],
+        ... 'Third':[np.nan, 40, 80, 98]
+        ... }
+        >>> d = MissFiller(d1)
+        >>> d.df
+               First  Second  Third
+            0  100.0    30.0    NaN
+            1   90.0    45.0   40.0
+            2    NaN    56.0   80.0
+            3   95.0     NaN   98.0
+        >>> d.fill_mw()
+               First  Second  Third
+            0  100.0    30.0   60.0
+            1   90.0    45.0   40.0
+            2   95.0    56.0   80.0
+            3   95.0    50.5   98.0
+        >>> d.fill_mw(axis=1)
+               First  Second  Third
+            0  100.0    30.0   65.0
+            1   90.0    45.0   40.0
+            2   68.0    56.0   80.0
+            3   95.0    96.5   98.0
+
+        Returns
+        -------
+        pd.DataFrame
+        """
+        if axis == 1:
+            input_df = self.df
+            out_df = moving_window(input_df, nindex = nindex, wsize=wsize, 
+            errors=errors, func=func)
+        elif axis == 0:
+            input_df = self.df.T
+            out_df = moving_window(input_df, nindex = nindex, wsize=wsize, 
+            errors=errors, func=func).T
+        return out_df
+
+
+    def fill_fKNN(self, method='mean', axis=1, k=3, eps=0, p=2, 
+                  distance_upper_bound=np.inf, leafsize=10):
+        """
+        Impute missing values using the K-nearest neighbors (kNN) algorithm.
+        First, apply an initial imputation function (e.g., mean imputation)
+        to handle missing data, creating a complete array. Use this array
+        to construct a KDTree to identify the nearest neighbors. After finding
+        the k nearest neighbors, compute a weighted average of these neighbors
+        based on their distances to perform the final imputation.
+
+        Parameters
+        ----------
+        axis : int, optional
+            Must be 0 or 1. 
+            0: Use *column* mean/median/min/max/bfill/ffill for initial 
+               imputation. Search *rows* for k nearest neighbours.
+            1: Use *row* mean/median/min/max/bfill/ffill for initial 
+               imputation. Search *columns* for k nearest neighbours.
+            The default is 1 (see Notes below).
+
+        method : {'mean', 'median', 'min', 'max', 'bfill', 'ffill'}
+            Initial imputation method. See fill_trend() for details.
+            The default is 'mean'
+
+        k: int, optional
+            Parameter used for method querying the KDTree class object. Number
+            of neighbours used in the KNN query.
+
+        eps: nonnegative float, optional
+            Parameter used for method querying the KDTree class object. From
+            the SciPy docs: "Return approximate nearest neighbors; the kth
+            returned value is guaranteed to be no further than (1+eps) times
+            the distance to the real kth nearest neighbor".
+
+        p : float, 1<=p<=infinity, optional
+            Parameter used for method querying the KDTree class object.
+            Straight from the SciPy docs: "Which Minkowski p-norm to use. 1 is
+            the sum-of-absolute-values Manhattan distance 2 is the usual
+            Euclidean distance infinity is the maximum-coordinate-difference
+            distance".
+
+        distance_upper_bound : nonnegative float, optional
+            Parameter used for method querying the KDTree class object.
+            Straight from the SciPy docs: "Return only neighbors within this 
+            instance. This is used to prune tree searches, so if you are doing
+            a series of nearest-neighbor queries, it may help to supply the
+            distance to the nearest neighbor of the most recent point.
+
+        leafsize: int, optional
+            Parameter used for construction of the `KDTree` class object.
+            Straight from the SciPy docs: "The number of points at which the
+            algorithm switches over to brute-force. Has to be positive".
+
+        Notes
+        -----
+        In biomedical research, it is common practice to organize features 
+        (e.g., genes, CpGs, genomic regions) as rows and samples (e.g., 
+        patients, cells) as columns. An example is shown below:
+
+            cg_ID   TCGA-BC-A10Q    TCGA-BC-A10R    TCGA-BC-A10S    TCGA-BC-A10T    TCGA-BC-A10U
+            cg00000029      0.3469  0.387   0.3428  0.3064  0.3939
+            cg00000165      NA      0.1656  0.1212  0.1171  0.1626
+            cg00000236      0.8479  NA      0.8647  0.8918  0.8674
+            cg00000289      0.6658  0.5231  0.6022  0.7026  0.7297
+            cg00000292      0.6913  0.752   0.6212  0.751   0.7616
+            cg00000363      0.7589  0.6407  0.6119  0.6595  0.6155
+            cg00000622      0.015   0.0137  0.0277  0.0139  0.0141
+            cg00000658      0.8987  0.8959  0.6375  0.881   0.8795
+            cg00000714      0.1591  0.1372  0.2413  0.173   0.2007
+            cg00000721      0.9491  0.9464  0.8963  0.9413  0.9512
+            cg00000734      0.0492  0.0506  0.0477  0.0695  0.0643
+            ...
+
+            In this case, we recommend to set axis = 1.
+
+        Returns
+        ----------
+        pd.DataFrame
+        """
+
+        if axis == 1:
+            na_ind = nan_indices(self.df.T.to_numpy())
+        elif axis == 0:
+            na_ind = nan_indices(self.df.to_numpy())
+        else:
+            raise ValueError("axis must be 0 or 1.")
+        
+        #pre-impute
+        input_df = self.fill_trend(method=method, axis=axis)
+
+        if axis == 1:
+            input_df = input_df.T
+            out_df = fKNN(input_df, na_locations = na_ind, k=k, eps=eps, p=p,
+                 distance_upper_bound=distance_upper_bound, 
+                 leafsize=leafsize)
+            out_df = out_df.T
+        elif axis == 0:
+            out_df = fKNN(input_df, na_locations = na_ind, k=k, eps=eps, p=p,
+                 distance_upper_bound=distance_upper_bound, 
+                 leafsize=leafsize)
+        else:
+            raise ValueError("axis only accepts 0 or 1.")
+        return out_df
+
+    def fill_ref(self, ref, axis=1, k=3, eps=0, p=2, 
+                  distance_upper_bound=np.inf, leafsize=10):
+        """
+        The algorithm is similar to fKNN imputation, where the k-nearest 
+        neighbors are searched from the external reference.
+        
+        Parameters
+        ----------
+        axis : int, optional
+            Must be 0 or 1. 
+            0: Use *column* mean/median/min/max/bfill/ffill for initial 
+               imputation. Search *rows* for k nearest neighbours.
+            1: Use *row* mean/median/min/max/bfill/ffill for initial 
+               imputation. Search *columns* for k nearest neighbours.
+            The default is 1 (see Notes below).
+        
+        ref: pd.DataFrame
+            The reference DataFrame must NOT contain any missing values.
+            When axis=1: The reference DataFrame should be a superset of the
+            dataset being imputed with respect to row names (index). 
+            Otherwise, rows that cannot be found in the reference may be 
+            removed from the results.
+            When axis=0: The reference DataFrame should be a superset of the
+            dataset being imputed with respect to column names. Otherwise,
+            columns that cannot be found in the reference may be removed from 
+            the results.
+
+        k: int, optional
+            Parameter used for method querying the KDTree class object. Number
+            of neighbours used in the KNN query.
+
+        eps: nonnegative float, optional
+            Parameter used for method querying the KDTree class object. From
+            the SciPy docs: "Return approximate nearest neighbors; the kth
+            returned value is guaranteed to be no further than (1+eps) times
+            the distance to the real kth nearest neighbor".
+
+        p : float, 1<=p<=infinity, optional
+            Parameter used for method querying the KDTree class object.
+            Straight from the SciPy docs: "Which Minkowski p-norm to use. 1 is
+            the sum-of-absolute-values Manhattan distance 2 is the usual
+            Euclidean distance infinity is the maximum-coordinate-difference
+            distance".
+
+        distance_upper_bound : nonnegative float, optional
+            Parameter used for method querying the KDTree class object.
+            Straight from the SciPy docs: "Return only neighbors within this 
+            instance. This is used to prune tree searches, so if you are doing
+            a series of nearest-neighbor queries, it may help to supply the
+            distance to the nearest neighbor of the most recent point.
+
+        leafsize: int, optional
+            Parameter used for construction of the `KDTree` class object.
+            Straight from the SciPy docs: "The number of points at which the
+            algorithm switches over to brute-force. Has to be positive".
+
+        Returns
+        -------
+        pd.DataFrame.
+
+        """
+        # Search for columns from the external reference for "K nearest neighbours"
+        if axis == 1:
+            names_data = self.df.index
+            names_ref = ref.index
+            names_common = list(set(names_data) & set(names_ref))
+            ref_df = ref.loc[names_common] 
+            input_df = self.df.loc[names_common] 
+            row_names = input_df.index
+            col_names = input_df.columns
+            input_df = input_df.T.to_numpy() #transpose input
+            na_ind = nan_indices(input_df)
+            ref_df = ref_df.T.to_numpy() #transpose reference
+            out = external_ref(input_df,
+                                  na_locations = na_ind, 
+                                  ref_data = ref_df,
+                                  k=k, eps=eps, p=p,
+                                  distance_upper_bound=distance_upper_bound, 
+                                  leafsize=leafsize)
+            out_df = pd.DataFrame(np.transpose(out), index=row_names, 
+                                  columns = col_names)
+        # Search for rows from the external reference for "K nearest neighbours"
+        elif axis == 0:
+            names_data = self.df.columns
+            names_ref = ref.columns
+            names_common = list(set(names_data) & set(names_ref))
+            ref_df = ref[names_common] 
+            input_df = self.df[names_common] 
+            row_names = input_df.index
+            col_names = input_df.columns
+            input_df = input_df.to_numpy()
+            na_ind = nan_indices(input_df)
+            ref_df = ref_df.to_numpy()
+            out = external_ref(input_df,
+                                  na_locations = na_ind, 
+                                  ref_data = ref_df,
+                                  k=k, eps=eps, p=p,
+                                  distance_upper_bound=distance_upper_bound, 
+                                  leafsize=leafsize)
+            out_df = pd.DataFrame(out, index=row_names, 
+                                  columns = col_names)
+
+        else:
+            raise ValueError("axis only accepts 0 or 1.")
+        return out_df
+        
+    def fill_KNN(self, axis=1, method='mean', **kwargs):
+        """
+        Use sklearn's KNNImputer function with some improvements.
+        
+        Parameters
+        ----------
+        axis : {0, 1}
+            0: Use *column* mean for initial imputation. Search *rows* for k
+                nearest neighbours.
+            1: Use *row* mean for initial imputation. Search *columns* for k
+                nearest neighbours.
+            The default is 1
+
+        method : {'mean', 'median', 'min', 'max', 'bfill', 'ffill'}
+            Initial imputation method. See fill_trend() for details.
+            The default is 'mean'.
+
+        Returns
+        -------
+        pd.DataFrame.
+        """
+        #input_df = self.fill_trend(method=method, axis=axis)
+        input_df = self.df
+
+        imputer = KNNImputer(**kwargs)
+        #impute on rows
+        if axis == 1:
+            input_df = input_df.T
+            after = imputer.fit_transform(input_df)
+            out_df = pd.DataFrame(after, index = input_df.index,
+                                  columns = input_df.columns).T
+            #output_df = output_df.round(args.decimal)
+        elif axis == 0:
+            after = imputer.fit_transform(input_df)
+            out_df = pd.DataFrame(after, index = input_df.index,
+                                  columns = input_df.columns)
+        else:
+            raise ValueError("axis only accepts 0 or 1.")
+        return out_df
+            
+
+    def fill_EM(self, axis=1, eps=0.001):
+        """
+        Imputes missing data using the Expectation-Maximization (EM) algorithm.
+        * E-step: Calculates the expected log-likelihood of the complete data.
+        * M-step: Optimizes the parameters to maximize the log-likelihood of 
+          the complete data.
+
+        Parameters
+        ----------
+        axis : {0, 1}
+            0: perform EM on non-missing values from the same column.
+            1: perform EM on non-missing values from the same row.
+            Default is 1.
+
+        eps : float, optional
+            The amount of minimum change between iterations to break, if 
+            relative change < eps, converge. 
+            relative change = abs(current - previous) / previous
+
+        Returns
+        -------
+        pd.DataFrame
+
+        """
+        if axis == 1:
+            out_df = em(self.df.T, eps=eps).T
+        elif axis == 0:
+            out_df = em(self.df, eps=eps)
+        else:
+            raise Exception("axis must be 0 or 1.")
+        return out_df
+
+    def fill_Buck(self, axis=0, eps=0.001):
+        """
+        Iterative Variant of Buck's Method
+        
+        The variable to be regressed is selected randomly at each iteration.
+        The iterative EM-like process continues until the change in 
+        predictions, compared to the previous iteration, is less than 10% 
+        for all columns with missing values.
+        
+        Reference
+        ---------
+        S.F. Buck, "A Method of Estimation of Missing Values in Multivariate 
+        Data Suitable for Use with an Electronic Computer," Journal of the 
+        Royal Statistical Society: Series B (Methodological), Vol. 22, No. 2 
+        (1960), pp. 302-306.
+
+        Parameters
+        ----------
+        axis : {0, 1}
+            0: perform Buck's method on columns.
+            1: erform Buck's method on rows.
+            The default is 0.
+
+        eps : float, optional
+            The amount of minimum change between iterations to break, if 
+            relative change < eps, converge. 
+            relative change = abs(current - previous) / previous
+
+        Returns
+        -------
+        pd.DataFrame
+
+        """
+        if axis == 1:
+            out_df = buck_iterative(self.df.T, eps = eps).T
+        elif axis == 0:
+            out_df = buck_iterative(self.df, eps = eps)
+        else:
+            raise Exception("axis must be 0 or 1.")
+        return out_df
+
+    def fill_NNM(self, require_symmetric_solution=False, min_value=None, 
+                 max_value=None, error_tolerance=0.001, max_iters=5000):
+        """
+        Impute missing values using NuclearNormMinimization.
+        
+        Notes:
+        ------
+        Mighte be very slow for large dataset.
+
+        Returns
+        -------
+        pd.DataFrame
+        
+        NOTE:
+        ----
+        This process is very slow, especially for larger dataset.
+        """
+        X_filled = NuclearNormMinimization(require_symmetric_solution = require_symmetric_solution, 
+                                           min_value = min_value,
+                                           max_value = max_value,
+                                           error_tolerance = error_tolerance,
+                                           max_iters = max_iters,
+                                           ).fit_transform(self.df.to_numpy())
+        out_df = pd.DataFrame(
+            X_filled, index=self.df.index, columns=self.df.columns)
+        return out_df
+
+    def fill_SoftImpute(self, shrinkage_value=None, 
+                        convergence_threshold=0.001, 
+                        max_iters=500, max_rank=None, n_power_iterations=1, 
+                        init_fill_method='zero', min_value=None, 
+                        max_value=None,normalizer=None):
+        """
+        Matrix completion by iterative soft thresholding of SVD decompositions.
+        Similar to R softImpute package.
+        
+        Returns
+        -------
+        pd.DataFrame
+        
+        """
+        X_filled = SoftImpute(shrinkage_value = shrinkage_value, 
+                              convergence_threshold = convergence_threshold,
+                              max_iters = max_iters, 
+                              max_rank = max_rank,
+                              n_power_iterations = n_power_iterations,
+                              init_fill_method = init_fill_method,
+                              min_value = min_value,
+                              max_value = max_value,
+                              normalizer = normalizer
+                              ).fit_transform(self.df.to_numpy())
+        out_df = pd.DataFrame(X_filled, index=self.df.index, columns=self.df.columns)
+        return out_df
+
+    def fill_IterativeSVD(self, rank=10, convergence_threshold=0.001, 
+                          max_iters=500, gradual_rank_increase=True, 
+                          svd_algorithm='arpack', init_fill_method='zero', 
+                          min_value=None, max_value=None):
+        """
+        Matrix completion by iterative low-rank SVD decomposition.
+        
+        Returns
+        -------
+        pd.DataFrame
+        
+        """
+        X_filled = IterativeSVD(rank = rank, 
+                              convergence_threshold = convergence_threshold,
+                              max_iters = max_iters, 
+                              gradual_rank_increase = gradual_rank_increase,
+                              svd_algorithm = svd_algorithm,
+                              init_fill_method = init_fill_method,
+                              min_value = min_value,
+                              max_value = max_value
+                              ).fit_transform(self.df.to_numpy())
+        out_df = pd.DataFrame(X_filled, index=self.df.index, columns=self.df.columns)
+        return out_df
+
+    def fill_IterativeImputer(self):
+        """
+        A strategy for imputing missing values by modeling each feature with 
+        missing values as a function of other features in a round-robin fashion.
+        Same as MICE (Multiple Imputation by  chained equations) in R.
+        Returns
+        -------
+        pd.DataFrame
+        
+        """
+        X_filled = IterativeImputer().fit_transform(self.df.to_numpy())
+        out_df = pd.DataFrame(X_filled, index=self.df.index, columns=self.df.columns)
+        return out_df
+
+    def fill_MatrixFactorization(self, rank=40, learning_rate=0.01, 
+                                 max_iters=500, shrinkage_value=0, 
+                                 min_value=None, max_value=None):
+        """
+        Direct factorization of the incomplete matrix into low-rank U and V, 
+        with per-row and per-column biases, as well as a global bias.
+        
+        Returns
+        -------
+        pd.DataFrame
+        
+        """
+        X_filled = MatrixFactorization(rank = rank,
+                                       learning_rate = learning_rate,
+                                       max_iters = max_iters,
+                                       shrinkage_value = shrinkage_value,
+                                       min_value = min_value,
+                                       max_value = max_value
+                                       ).fit_transform(self.df.to_numpy())
+        out_df = pd.DataFrame(X_filled, index=self.df.index, columns=self.df.columns)
+        return out_df
+
+    def fill_RF(self, max_iter=500, decreasing=False, missing_values=np.nan,
+                 copy=True, n_estimators=100, criterion=('squared_error', 'gini'),
+                 max_depth=None, min_samples_split=2, min_samples_leaf=1,
+                 min_weight_fraction_leaf=0.0, max_features=1.0,
+                 max_leaf_nodes=None, min_impurity_decrease=0.0,
+                 bootstrap=True, oob_score=False, n_jobs=-1, random_state=None,
+                 verbose=0, warm_start=False, class_weight=None):
+        """
+        Missing value imputation using Random Forests.
+        
+        Returns
+        -------
+        pd.DataFrame
+        
+        """
+        imputer = MissForest(max_iter = max_iter,
+                             decreasing = decreasing,
+                             missing_values = missing_values,
+                             copy = copy,
+                             n_estimators = n_estimators,
+                             criterion = criterion,
+                             max_depth = max_depth,
+                             min_samples_split = min_samples_split,
+                             min_samples_leaf = min_samples_leaf,
+                             min_weight_fraction_leaf = min_weight_fraction_leaf,
+                             max_features = max_features,
+                             max_leaf_nodes = max_leaf_nodes,
+                             min_impurity_decrease = min_impurity_decrease,
+                             bootstrap = bootstrap,
+                             oob_score = oob_score,
+                             n_jobs = -1,
+                             random_state = random_state,
+                             verbose = verbose,
+                             warm_start = warm_start,
+                             class_weight = class_weight)
+        X_filled = imputer.fit_transform(self.df.to_numpy())
+        out_df = pd.DataFrame(X_filled, index=self.df.index, columns=self.df.columns)
+        return out_df
+
+    def more(self, group, decimal=5, seed=1234, n_proc=8, train_size=0.75):
+        """
+        
+
+        Parameters
+        ----------
+        group : dict
+            Describe the group information of samples. For example:
+                {'A':["sample1", "sample2", "sample3"],
+                 'B':["sample4", "sample5", "sample6"]}
+        decimal : int, optional
+           "Number of decimal places to round. The default is 5.
+        seed : int, optional
+            Seed used to initialize a pseudorandom number generator. The default is 1234.
+        n_proc : int, optional
+            Number of processors to use. The default is 8.
+        train_size : float, optional
+            Fraction of samples used as training dataset.Used to split the
+            samples into "training" and "testing". The default is 0.75.
+
+        Returns
+        -------
+        result : df.DataFrame
+
+        """
+    
+        #toal_na =self.na_count
+        
+        #Find rows where all values are missing
+        all_missing_ind = self.df.isna().all(axis=1)
+        df_all_missing = self.df.loc[all_missing_ind]
+       
+        # Drop %d rows where all values are missing.
+        df1 = self.df.dropna(how='all')
+       
+        all_samples = []
+        group_names = sorted(group.keys())
+        for g in group_names:
+            print("Group \"%s\" contains %d samples" % (g, len(group[g])))
+            all_samples.extend(group[g])
+       
+        if  len(all_samples) != len(set(all_samples)):
+            print("Sample IDs are not unique", file=sys.stderr)
+            sys.exit()
+
+        g0_samples = group[group_names[0]]
+        g1_samples = group[group_names[1]]
+        
+        # exclude samples from data_file if they are not in the group_file
+        used_df = df1[all_samples]
+        df_all_missing = df_all_missing[all_samples]
+        used_df_g0 = used_df[g0_samples]
+        used_df_g1 = used_df[g1_samples]
+        
+        # list of bool values indicating each row is "ALL NA" or not
+        g0_all_NA_ind = used_df_g0.isnull().all(axis=1) #g0: Entire row are "NAs"
+        g1_all_NA_ind = used_df_g1.isnull().all(axis=1) #g1: Entire row are "NAs"
+        print("%d rows in group \"%s\" are complete missing." % (sum(g0_all_NA_ind), group_names[0]), file=sys.stderr)
+        print("%d rows in group \"%s\" are complete missing." % (sum(g1_all_NA_ind), group_names[1]), file=sys.stderr)
+        
+        g0_all_NA = used_df.loc[g0_all_NA_ind].copy() #df for predict g0
+        g1_all_NA = used_df.loc[g1_all_NA_ind].copy() #df for predict g1
+        
+        #exclude those rows that are full NAs in either g0 or g1
+        #Still, there could be some sporadic NAs
+        used_df_train = used_df.loc[~(g0_all_NA_ind | g1_all_NA_ind)]
+        tmp = MissFiller(used_df_train)
+        if tmp.na_count > 0:
+            print("There are %d sporadic missing values." %  tmp.na_count, file=sys.stderr)
+            print("Impute sporadic missing values using Buck's method ...", file=sys.stderr)
+            used_df_train = tmp.fill_Buck()
+        g0_train = used_df_train[g0_samples]
+        g1_train = used_df_train[g1_samples]
+        
+        #group "g0" has missing vlaues. Use g1 to predict g0
+        if len(g0_all_NA) > 0:
+            print("Predict missing values in group \"%s\"" % group_names[0], file=sys.stderr)
+            X_train, X_test, y_train, y_test = train_test_split(
+            g1_train, g0_train, 
+            train_size=train_size, random_state=seed
+            )
+    
+            # multiple output regression
+            regr_multirf = MultiOutputRegressor(
+                RandomForestRegressor(max_depth=30, random_state=seed),
+                n_jobs=n_proc)
+            
+            # Fit on the train data
+            regr_multirf.fit(X_train, y_train)
+            
+            # Check the prediction score
+            score = regr_multirf.score(X_test, y_test)
+            print(
+                "The prediction score (coefficient of determination) is {:.2f}%".format(score*100), file=sys.stderr)
+    
+            # predict
+            g0_all_NA[g0_samples] = regr_multirf.predict(g0_all_NA[g1_samples]).round(decimal)
+            g0_all_NA.to_csv('g0.tsv', sep="\t")
+        
+        #group "g1" has missing vlaues. Use g0 to predict g1
+        if len(g1_all_NA) > 0:
+            print("Predict missing values in group \"%s\"" % group_names[1], file=sys.stderr)
+            X_train, X_test, y_train, y_test = train_test_split(
+            g0_train, g1_train, 
+            train_size=train_size, random_state=seed
+            )
+    
+            # multiple output regression
+            regr_multirf = MultiOutputRegressor(
+                RandomForestRegressor(max_depth=30, random_state=seed),
+                n_jobs=n_proc)
+            
+            # Fit on the train data
+            regr_multirf.fit(X_train, y_train)
+            
+            # Check the prediction score
+            score = regr_multirf.score(X_test, y_test)
+            print(
+                "The prediction score (coefficient of determination) is {:.2f}%".format(score*100), file=sys.stderr)
+    
+            # predict
+            g1_all_NA[g1_samples] = regr_multirf.predict(g1_all_NA[g0_samples]).round(decimal)
+            g1_all_NA.to_csv('g1.tsv', sep="\t")
+        result = pd.concat([used_df_train, g0_all_NA, g1_all_NA, df_all_missing])
+        print('Re-order the index as the original dataframe ...', file=sys.stderr)
+        result = result.reindex_like(self.df).round(decimal)
+        return result
