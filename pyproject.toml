@@ -40,6 +40,5 @@ classifiers=[
 keywords = ["missing value", "NA", "imputation", "impute"]
 
 [project.urls]
-Documentation = "https://cpgtools.readthedocs.io/en/latest/index.html"
-Repository = "https://github.com/liguowang/cpgtools.git"
+Repository = "https://github.com/liguowang/ultra-impute"
 
