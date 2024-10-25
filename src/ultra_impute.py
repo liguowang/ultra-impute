@@ -16,11 +16,13 @@ from sklearn.impute import KNNImputer
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.multioutput import MultiOutputRegressor
 from sklearn.model_selection import train_test_split
+from util import cluster_cols
 
 __all__ = ["MissFiller"]
 
+
 class MissFiller:
-    
+
     def __init__(self, data, prefix=None):
         """
         The input must be one of the following types: pd.DataFrame, np.ndarray,
@@ -34,47 +36,60 @@ class MissFiller:
             
         Examples
         --------
-        >>> import numpy as np
-        >>> import pandas as pd
-        >>> from missfiller import MissFiller
-        >>>
+        MissFiller can be initiated using dictionary, numpy ndarray or pandas 
+        DataFrame. Dictionary and ndarray will be converted into DataFrame.
+
         >>> d1 = {
-        ... 'First':[100, 90, np.nan, 95],
-        ... 'Second': [30, 45, 56, np.nan],
-        ... 'Third':[np.nan, 40, 80, 98]
-        ... }
-        >>> d = MissFiller(d1)
-        >>> d.df
-               First  Second  Third
-            0  100.0    30.0    NaN
-            1   90.0    45.0   40.0
-            2    NaN    56.0   80.0
-            3   95.0     NaN   98.0
-        >>>
+            'A':[0, 5, 10, 15, 20],
+            'B': [1, 6, np.nan, 16, 21],
+            'C':[np.nan, 7, 12, 17, 22],
+            'D':[3, 8, 13, 18, 23]
+            }
         >>> d2 = np.array([
-        ... [ 0.,  1., np.nan,  3.],
-        ... [ 5.,  6.,  7.,  8.],
-        ... [10., np.nan, 12., 13.],
-        ... [15., 16., 17., 18.],
-        ... [20., 21., 22., 23.]
-        ... ])
-        >>> d = MissFiller(d2)
-        >>> d.df
-                  0     1     2     3
-            0   0.0   1.0   NaN   3.0
-            1   5.0   6.0   7.0   8.0
-            2  10.0   NaN  12.0  13.0
-            3  15.0  16.0  17.0  18.0
-            4  20.0  21.0  22.0  23.0
+            [ 0.,  1., np.nan,  3.],
+            [ 5.,  6.,  7.,  8.],
+            [10., np.nan, 12., 13.],
+            [15., 16., 17., 18.],
+            [20., 21., 22., 23.]
+            ])
+        >>> d3= pd.DataFrame(d1)
+        >>> d4 = pd.DataFrame(d2, columns=['A','B ','C','D'])
         >>>
-        >>>d3 = pd.read_csv('test_data.withNA.tsv', header='infer', index_col=0, sep=None, engine='python')
-        >>> d3
-                        TCGA-BC-A10Q  TCGA-BC-A10R  TCGA-BC-A10S  TCGA-BC-A10T  TCGA-BC-A10U
-            cg_ID
-            cg00000029        0.3469        0.3870        0.3428        0.3064        0.3939
-            cg00000165           NaN        0.1656        0.1212        0.1171        0.1626
-            cg00000236        0.8479           NaN        0.8647        0.8918        0.8674
-        >>>d = MissFiller(d3)
+        >>> mf1 = MissFiller(d1)
+        >>> mf2 = MissFiller(d2)
+        >>> mf3 = MissFiller(d3)
+        >>> mf4 = MissFiller(d4)
+        >>>
+        >>> # mf1, mf2, mf3 and mf4 all contain the same data.
+        >>> mf1.df
+            A     B     C   D
+        0   0   1.0   NaN   3
+        1   5   6.0   7.0   8
+        2  10   NaN  12.0  13
+        3  15  16.0  17.0  18
+        4  20  21.0  22.0  23
+        >>> mf2.df
+              0     1     2     3
+        0   0.0   1.0   NaN   3.0
+        1   5.0   6.0   7.0   8.0
+        2  10.0   NaN  12.0  13.0
+        3  15.0  16.0  17.0  18.0
+        4  20.0  21.0  22.0  23.0
+        >>> mf3.df
+            A     B     C   D
+        0   0   1.0   NaN   3
+        1   5   6.0   7.0   8
+        2  10   NaN  12.0  13
+        3  15  16.0  17.0  18
+        4  20  21.0  22.0  23
+        >>> mf4.df
+              A    B      C     D
+        0   0.0   1.0   NaN   3.0
+        1   5.0   6.0   7.0   8.0
+        2  10.0   NaN  12.0  13.0
+        3  15.0  16.0  17.0  18.0
+        4  20.0  21.0  22.0  23.0
+
         """
         if isinstance(data, pd.DataFrame):
             self.df = data
@@ -119,26 +134,13 @@ class MissFiller:
 
         Examples
         --------
-        >>> d1 = {
-        ... 'First':[100, 90, np.nan, 95],
-        ... 'Second': [30, 45, 56, np.nan],
-        ... 'Third':[np.nan, 40, 80, 98]
-        ... }
-        >>> d = MissFiller(d1)
-        >>> d.df
-               First  Second  Third
-            0  100.0    30.0    NaN
-            1   90.0    45.0   40.0
-            2    NaN    56.0   80.0
-            3   95.0     NaN   98.0
-        >>> d.get_na_indices()
-            array([[0, 2],
-                   [2, 0],
-                   [3, 1]])
+        >>> mf1.get_na_indices()
+        array([[0, 2],
+              [2, 1]])
 
         Returns
         -------
-        List of list.
+        Array of lists.
         """
         return nan_indices(self.df.to_numpy())
 
@@ -161,29 +163,13 @@ class MissFiller:
 
         Examples
         --------
-        >>> d1 = {
-        ... 'First':[100, 90, np.nan, 95],
-        ... 'Second': [30, 45, 56, np.nan],
-        ... 'Third':[np.nan, 40, 80, 98]
-        ... }
-        >>> d = MissFiller(d1)
-        >>> d.df
-               First  Second  Third
-            0  100.0    30.0    NaN
-            1   90.0    45.0   40.0
-            2    NaN    56.0   80.0
-            3   95.0     NaN   98.0
-        >>> d.count_row_na()
-            0    1
-            1    0
-            2    1
-            3    1
-            dtype: int64
-        >>> d.count_col_na()
-            First     1
-            Second    1
-            Third     1
-            dtype: int64
+        >>> mf1.count_row_na()
+        0    1
+        1    0
+        2    1
+        3    0
+        4    0
+        dtype: int64
 
         Returns
         -------
@@ -196,7 +182,15 @@ class MissFiller:
     def count_col_na(self):
         """
         Counts the number of missing values for each column.
-        
+
+        Examples
+        --------
+        >>> mf1.count_col_na()
+        A    0
+        B    1
+        C    1
+        D    0
+
         Returns
         -------
         pd.Series
@@ -224,25 +218,18 @@ class MissFiller:
 
         Examples
         --------
-        >>> d1 = {
-        ... 'First':[100, 90, np.nan, 95],
-        ... 'Second': [30, 45, 56, np.nan],
-        ... 'Third':[np.nan, 40, 80, 98]
-        ... }
-        >>> d = MissFiller(d1)
-        >>> d.df
-               First  Second  Third
-            0  100.0    30.0    NaN
-            1   90.0    45.0   40.0
-            2    NaN    56.0   80.0
-            3   95.0     NaN   98.0
-        >>> d.remove_na()
-               First  Second  Third
-            1   90.0    45.0   40.0
-        >>> d.remove_na(axis=1)
-            Empty DataFrame
-            Columns: []
-            Index: [0, 1, 2, 3]
+        >>> mf1.remove_na()
+            A     B     C   D
+        1   5   6.0   7.0   8
+        3  15  16.0  17.0  18
+        4  20  21.0  22.0  23
+        >>> mf1.remove_na(axis=1)
+            A   D
+        0   0   3
+        1   5   8
+        2  10  13
+        3  15  18
+        4  20  23
 
         Returns
         -------
@@ -286,23 +273,13 @@ class MissFiller:
         
         Examples
         --------
-            >>> dat = np.array([
-            ... [ 0.,  1., np.nan,  3.,  4.],
-            ... [ 5.,  6.,  7.,  8.,  9.],
-            ... [10., 11., 12., 13., 14.],
-            ... [15., 16., 17., 18., 19.],
-            ... [20., 21., 22., 23., 24.]
-            ... ])
-            >>>
-            >>> d = MissFiller(dat)
-            >>> d.insert_na(n_miss = 5)
-            
-                s_0   s_1   s_2   s_3   s_4
-            0   0.0   1.0   NaN   3.0   4.0
-            1   5.0   6.0   7.0   8.0   9.0
-            2  10.0   NaN  12.0  13.0   NaN
-            3  15.0   NaN   NaN  18.0  19.0
-            4  20.0  21.0  22.0  23.0  24.0
+        >>> mf1.insert_na(n_miss = 5)
+              A     B     C     D
+        0   0.0   1.0   NaN   3.0
+        1   5.0   6.0   7.0   NaN
+        2   NaN   NaN   NaN  13.0
+        3  15.0  16.0  17.0  18.0
+        4  20.0  21.0  22.0  23.0
         """
         np.random.seed(seed)
         input_df = self.df.copy()
@@ -335,7 +312,17 @@ class MissFiller:
         """
         Replaces missing values with a specified value (can be an integer,
         float, or string).
-        
+
+        Examples
+        --------
+        >>> mf1.replace_na(100)
+            A      B      C   D
+        0   0    1.0  100.0   3
+        1   5    6.0    7.0   8
+        2  10  100.0   12.0  13
+        3  15   16.0   17.0  18
+        4  20   21.0   22.0  23
+
         Returns
         -------
         pd.DataFrame
@@ -348,7 +335,6 @@ class MissFiller:
         Replaces missing values with one of the following: 'min', 'max',
         'mean', 'median', 'bfill' (backfill), or 'ffill' (forward fill).
 
-        
         Parameters
         ----------
         axis : {0, 1}
@@ -378,36 +364,27 @@ class MissFiller:
 
         Examples
         --------
-        >>> d1 = {
-        ... 'First':[100, 90, np.nan, 95],
-        ... 'Second': [30, 45, 56, np.nan],
-        ... 'Third':[np.nan, 40, 80, 98]
-        ... }
-        >>> d = MissFiller(d1)
-        >>> d.df
-               First  Second  Third
-            0  100.0    30.0    NaN
-            1   90.0    45.0   40.0
-            2    NaN    56.0   80.0
-            3   95.0     NaN   98.0
-        >>> d.fill_trend(method='mean')
-               First     Second      Third
-            0  100.0  30.000000  72.666667
-            1   90.0  45.000000  40.000000
-            2   95.0  56.000000  80.000000
-            3   95.0  43.666667  98.000000
-        >>> d.fill_trend(method='mean', axis=1)
-               First  Second  Third
-            0  100.0    30.0   65.0
-            1   90.0    45.0   40.0
-            2   68.0    56.0   80.0
-            3   95.0    96.5   98.0
-        >>> d.fill_trend(method='bfill')
-               First  Second  Third
-            0  100.0    30.0   40.0
-            1   90.0    45.0   40.0
-            2   95.0    56.0   80.0
-            3   95.0     NaN   98.0
+        >>> mf1.fill_trend(method='mean')
+                A     B     C   D
+            0   0   1.0  14.5   3
+            1   5   6.0   7.0   8
+            2  10  11.0  12.0  13
+            3  15  16.0  17.0  18
+            4  20  21.0  22.0  23
+        >>> mf1.fill_trend(method='mean', axis=1)
+                  A          B          C     D
+            0   0.0   1.000000   1.333333   3.0
+            1   5.0   6.000000   7.000000   8.0
+            2  10.0  11.666667  12.000000  13.0
+            3  15.0  16.000000  17.000000  18.0
+            4  20.0  21.000000  22.000000  23.0
+        >>> mf1.fill_trend(method='bfill')
+                A     B     C   D
+            0   0   1.0   7.0   3
+            1   5   6.0   7.0   8
+            2  10  16.0  12.0  13
+            3  15  16.0  17.0  18
+            4  20  21.0  22.0  23
 
         Returns
         -------
@@ -428,7 +405,7 @@ class MissFiller:
         """
         Replaces missing values with random values selected from the
         corresponding row or column.
-        
+
         Parameters
         ----------
         axis : {0, 1}
@@ -438,24 +415,13 @@ class MissFiller:
 
         Examples
         --------
-        >>> d1 = {
-        ... 'First':[100, 90, np.nan, 95],
-        ... 'Second': [30, 45, 56, np.nan],
-        ... 'Third':[np.nan, 40, 80, 98]
-        ... }
-        >>> d = MissFiller(d1)
-        >>> d.df
-               First  Second  Third
-            0  100.0    30.0    NaN
-            1   90.0    45.0   40.0
-            2    NaN    56.0   80.0
-            3   95.0     NaN   98.0
-        >>> d.fill_rand()
-               First  Second  Third
-            0  100.0    30.0   80.0
-            1   90.0    45.0   40.0
-            2   90.0    56.0   80.0
-            3   95.0    30.0   98.0
+        >>> mf1.fill_rand()
+              A     B     C     D
+        0   0.0   1.0  17.0   3.0
+        1   5.0   6.0   7.0   8.0
+        2  10.0  21.0  12.0  13.0
+        3  15.0  16.0  17.0  18.0
+        4  20.0  21.0  22.0  23.0
 
         Returns
         -------
@@ -474,10 +440,9 @@ class MissFiller:
         """
         Replaces missing values with values calculated from moving windows
         along rows or columns.
-        
+
         Parameters
         ----------
-
         axis : {0, 1}
             0: Apply moving windows along the columns.
             1: Apply moving windows along the rows.
@@ -505,30 +470,20 @@ class MissFiller:
 
         Examples
         --------
-        >>> d1 = {
-        ... 'First':[100, 90, np.nan, 95],
-        ... 'Second': [30, 45, 56, np.nan],
-        ... 'Third':[np.nan, 40, 80, 98]
-        ... }
-        >>> d = MissFiller(d1)
-        >>> d.df
-               First  Second  Third
-            0  100.0    30.0    NaN
-            1   90.0    45.0   40.0
-            2    NaN    56.0   80.0
-            3   95.0     NaN   98.0
-        >>> d.fill_mw()
-               First  Second  Third
-            0  100.0    30.0   60.0
-            1   90.0    45.0   40.0
-            2   95.0    56.0   80.0
-            3   95.0    50.5   98.0
-        >>> d.fill_mw(axis=1)
-               First  Second  Third
-            0  100.0    30.0   65.0
-            1   90.0    45.0   40.0
-            2   68.0    56.0   80.0
-            3   95.0    96.5   98.0
+        >>> mf1.fill_mw()
+              A          B     C     D
+        0   0.0   1.000000   9.5   3.0
+        1   5.0   6.000000   7.0   8.0
+        2  10.0   7.666667  12.0  13.0
+        3  15.0  16.000000  17.0  18.0
+        4  20.0  21.000000  22.0  23.0
+        >>> mf1.fill_mw(axis=1)
+              A          B          C     D
+        0   0.0   1.000000   1.333333   3.0
+        1   5.0   6.000000   7.000000   8.0
+        2  10.0  11.666667  12.000000  13.0
+        3  15.0  16.000000  17.000000  18.0
+        4  20.0  21.000000  22.000000  23.0
 
         Returns
         -------
@@ -603,7 +558,6 @@ class MissFiller:
         In biomedical research, it is common practice to organize features 
         (e.g., genes, CpGs, genomic regions) as rows and samples (e.g., 
         patients, cells) as columns. An example is shown below:
-
             cg_ID   TCGA-BC-A10Q    TCGA-BC-A10R    TCGA-BC-A10S    TCGA-BC-A10T    TCGA-BC-A10U
             cg00000029      0.3469  0.387   0.3428  0.3064  0.3939
             cg00000165      NA      0.1656  0.1212  0.1171  0.1626
@@ -617,8 +571,17 @@ class MissFiller:
             cg00000721      0.9491  0.9464  0.8963  0.9413  0.9512
             cg00000734      0.0492  0.0506  0.0477  0.0695  0.0643
             ...
-
             In this case, we recommend to set axis = 1.
+
+        Examples
+        --------
+        >>> mf1.fill_fKNN()
+              A          B          C     D
+        0   0.0   1.000000   1.473573   3.0
+        1   5.0   6.000000   7.000000   8.0
+        2  10.0  11.535419  12.000000  13.0
+        3  15.0  16.000000  17.000000  18.0
+        4  20.0  21.000000  22.000000  23.0
 
         Returns
         ----------
@@ -648,6 +611,7 @@ class MissFiller:
         else:
             raise ValueError("axis only accepts 0 or 1.")
         return out_df
+
 
     def fill_ref(self, ref, axis=1, k=3, eps=0, p=2, 
                   distance_upper_bound=np.inf, leafsize=10):
@@ -754,7 +718,8 @@ class MissFiller:
         else:
             raise ValueError("axis only accepts 0 or 1.")
         return out_df
-        
+
+
     def fill_KNN(self, axis=1, method='mean', **kwargs):
         """
         Use sklearn's KNNImputer function with some improvements.
@@ -771,6 +736,16 @@ class MissFiller:
         method : {'mean', 'median', 'min', 'max', 'bfill', 'ffill'}
             Initial imputation method. See fill_trend() for details.
             The default is 'mean'.
+
+        Examples
+        --------
+        >>> mf1.fill_KNN()
+              A          B          C     D
+        0   0.0   1.000000   1.333333   3.0
+        1   5.0   6.000000   7.000000   8.0
+        2  10.0  11.666667  12.000000  13.0
+        3  15.0  16.000000  17.000000  18.0
+        4  20.0  21.000000  22.000000  23.0
 
         Returns
         -------
@@ -796,6 +771,7 @@ class MissFiller:
         return out_df
             
 
+
     def fill_EM(self, axis=1, eps=0.001):
         """
         Imputes missing data using the Expectation-Maximization (EM) algorithm.
@@ -815,6 +791,16 @@ class MissFiller:
             relative change < eps, converge. 
             relative change = abs(current - previous) / previous
 
+        Examples
+        --------
+        >>> mf1.fill_EM()
+              A          B          C     D
+        0   0.0   1.000000   3.591067   3.0
+        1   5.0   6.000000   7.000000   8.0
+        2  10.0  11.776261  12.000000  13.0
+        3  15.0  16.000000  17.000000  18.0
+        4  20.0  21.000000  22.000000  23.0
+
         Returns
         -------
         pd.DataFrame
@@ -827,6 +813,7 @@ class MissFiller:
         else:
             raise Exception("axis must be 0 or 1.")
         return out_df
+
 
     def fill_Buck(self, axis=0, eps=0.001):
         """
@@ -856,6 +843,16 @@ class MissFiller:
             relative change < eps, converge. 
             relative change = abs(current - previous) / previous
 
+        Examples
+        --------
+        >>> mf1.fill_Buck()
+              A     B     C     D
+        0   0.0   1.0   2.0   3.0
+        1   5.0   6.0   7.0   8.0
+        2  10.0  11.0  12.0  13.0
+        3  15.0  16.0  17.0  18.0
+        4  20.0  21.0  22.0  23.0
+
         Returns
         -------
         pd.DataFrame
@@ -869,14 +866,21 @@ class MissFiller:
             raise Exception("axis must be 0 or 1.")
         return out_df
 
+
     def fill_NNM(self, require_symmetric_solution=False, min_value=None, 
                  max_value=None, error_tolerance=0.001, max_iters=5000):
         """
         Impute missing values using NuclearNormMinimization.
-        
-        Notes:
-        ------
-        Mighte be very slow for large dataset.
+
+        Examples
+        --------
+        >>> mf1.fill_NNM()
+              A     B          C     D
+        0   0.0   1.0   1.998666   3.0
+        1   5.0   6.0   7.000000   8.0
+        2  10.0  11.0  12.000000  13.0
+        3  15.0  16.0  17.000000  18.0
+        4  20.0  21.0  22.000000  23.0
 
         Returns
         -------
@@ -896,6 +900,7 @@ class MissFiller:
             X_filled, index=self.df.index, columns=self.df.columns)
         return out_df
 
+
     def fill_SoftImpute(self, shrinkage_value=None, 
                         convergence_threshold=0.001, 
                         max_iters=500, max_rank=None, n_power_iterations=1, 
@@ -904,7 +909,17 @@ class MissFiller:
         """
         Matrix completion by iterative soft thresholding of SVD decompositions.
         Similar to R softImpute package.
-        
+
+        Examples
+        --------
+        >>> mf1.fill_SoftImpute()
+              A          B          C     D
+        0   0.0   1.000000   1.608209   3.0
+        1   5.0   6.000000   7.000000   8.0
+        2  10.0  10.776869  12.000000  13.0
+        3  15.0  16.000000  17.000000  18.0
+        4  20.0  21.000000  22.000000  23.0
+
         Returns
         -------
         pd.DataFrame
@@ -923,13 +938,33 @@ class MissFiller:
         out_df = pd.DataFrame(X_filled, index=self.df.index, columns=self.df.columns)
         return out_df
 
+
     def fill_IterativeSVD(self, rank=10, convergence_threshold=0.001, 
-                          max_iters=500, gradual_rank_increase=True, 
+                          max_iters=200, gradual_rank_increase=True, 
                           svd_algorithm='arpack', init_fill_method='zero', 
                           min_value=None, max_value=None):
         """
-        Matrix completion by iterative low-rank SVD decomposition.
-        
+        Matrix completion by iterative low-rank SVD decomposition. The input
+        dataframe must have at least 5 columns.
+
+        Examples
+        --------
+        >>> d5 = {
+        ... 'A':[0, 5, 10, 15, 20],
+        ... 'B': [1, 6, np.nan, 16, 21],
+        ... 'C':[np.nan, 7, 12, 17, 22],
+        ... 'D':[3, 8, 13, 18, 23],
+        ... 'E':[4, 9, 14, 19, 24]
+        ... }
+        >>> mf5 = MissFiller(d5)
+        >>> mf5.fill_IterativeSVD()
+              A          B          C     D     E
+        0   0.0   1.000000   2.039475   3.0   4.0
+        1   5.0   6.000000   7.000000   8.0   9.0
+        2  10.0   9.519816  12.000000  13.0  14.0
+        3  15.0  16.000000  17.000000  18.0  19.0
+        4  20.0  21.000000  22.000000  23.0  24.0
+
         Returns
         -------
         pd.DataFrame
@@ -947,19 +982,33 @@ class MissFiller:
         out_df = pd.DataFrame(X_filled, index=self.df.index, columns=self.df.columns)
         return out_df
 
+
     def fill_IterativeImputer(self):
         """
         A strategy for imputing missing values by modeling each feature with 
         missing values as a function of other features in a round-robin fashion.
         Same as MICE (Multiple Imputation by  chained equations) in R.
+
+
+        Examples
+        --------
+        >>> mf1.fill_IterativeImputer()
+              A     B     C     D
+        0   0.0   1.0   2.0   3.0
+        1   5.0   6.0   7.0   8.0
+        2  10.0  11.0  12.0  13.0
+        3  15.0  16.0  17.0  18.0
+        4  20.0  21.0  22.0  23.0
+
         Returns
         -------
         pd.DataFrame
-        
+
         """
         X_filled = IterativeImputer().fit_transform(self.df.to_numpy())
         out_df = pd.DataFrame(X_filled, index=self.df.index, columns=self.df.columns)
         return out_df
+
 
     def fill_MatrixFactorization(self, rank=40, learning_rate=0.01, 
                                  max_iters=500, shrinkage_value=0, 
@@ -967,7 +1016,17 @@ class MissFiller:
         """
         Direct factorization of the incomplete matrix into low-rank U and V, 
         with per-row and per-column biases, as well as a global bias.
-        
+
+        Examples
+        --------
+        >>> mf1.fill_MatrixFactorization()
+              A          B         C     D
+        0   0.0   1.000000   2.32574   3.0
+        1   5.0   6.000000   7.00000   8.0
+        2  10.0  11.003153  12.00000  13.0
+        3  15.0  16.000000  17.00000  18.0
+        4  20.0  21.000000  22.00000  23.0
+
         Returns
         -------
         pd.DataFrame
@@ -983,6 +1042,7 @@ class MissFiller:
         out_df = pd.DataFrame(X_filled, index=self.df.index, columns=self.df.columns)
         return out_df
 
+
     def fill_RF(self, max_iter=500, decreasing=False, missing_values=np.nan,
                  copy=True, n_estimators=100, criterion=('squared_error', 'gini'),
                  max_depth=None, min_samples_split=2, min_samples_leaf=1,
@@ -992,7 +1052,17 @@ class MissFiller:
                  verbose=0, warm_start=False, class_weight=None):
         """
         Missing value imputation using Random Forests.
-        
+
+        Examples
+        --------
+        >>> mf1.fill_RF()
+              A     B     C     D
+        0   0.0   1.0   8.6   3.0
+        1   5.0   6.0   7.0   8.0
+        2  10.0   6.4  12.0  13.0
+        3  15.0  16.0  17.0  18.0
+        4  20.0  21.0  22.0  23.0
+
         Returns
         -------
         pd.DataFrame
@@ -1022,7 +1092,7 @@ class MissFiller:
         out_df = pd.DataFrame(X_filled, index=self.df.index, columns=self.df.columns)
         return out_df
 
-    def more(self, group, decimal=5, seed=1234, n_proc=8, train_size=0.75):
+    def fill_more(self, group=None, decimal=5, seed=1234, n_proc=8, train_size=0.75):
         """
         
 
@@ -1032,6 +1102,8 @@ class MissFiller:
             Describe the group information of samples. For example:
                 {'A':["sample1", "sample2", "sample3"],
                  'B':["sample4", "sample5", "sample6"]}
+            Group ID can be arbitrary, but sample IDs must match the column names.
+            if set to None, using K-means to detect groups.
         decimal : int, optional
            "Number of decimal places to round. The default is 5.
         seed : int, optional
@@ -1049,6 +1121,9 @@ class MissFiller:
         """
     
         #toal_na =self.na_count
+        if group is None:
+            print("Binerize sample IDs into two groups using K-means ...", file=sys.stderr)
+            group = cluster_cols(self.df)
         
         #Find rows where all values are missing
         all_missing_ind = self.df.isna().all(axis=1)
@@ -1060,7 +1135,9 @@ class MissFiller:
         all_samples = []
         group_names = sorted(group.keys())
         for g in group_names:
-            print("Group \"%s\" contains %d samples" % (g, len(group[g])))
+            print("Group \"%s\" contains %d samples" % (str(g), len(group[g])), file=sys.stderr)
+            for s in group[g]:
+                print("\t" + s, file=sys.stderr)
             all_samples.extend(group[g])
        
         if  len(all_samples) != len(set(all_samples)):
