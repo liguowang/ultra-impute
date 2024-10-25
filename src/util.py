@@ -2,6 +2,8 @@
 from functools import wraps
 import numpy as np
 import pandas as pd
+from sklearn.cluster import KMeans
+
 
 # Things that get exposed from * import
 __all__ = [
@@ -10,20 +12,24 @@ __all__ = [
     "insert_na",
     ]
 
+
 def thread(arg, *fns):
     if len(fns) > 0:
         return thread(fns[0](arg), *fns[1:])
     else:
         return arg
 
+
 def identity(x):
     return x
+
 
 def constantly(x):
     """ Returns a function that takes any args and returns x """
     def func(*args, **kwargs):
         return x
     return func
+
 
 def complement(fn):
     """ Return fn that outputs the opposite truth values of the
@@ -34,12 +40,14 @@ def complement(fn):
         return not fn(*args, **kwargs)
     return wrapper
 
+
 def execute_fn_with_args_and_or_kwargs(fn, args, kwargs):
     """ If args + kwargs aren't accepted only args are passed in"""
     try:
         return fn(*args, **kwargs)
     except TypeError:
         return fn(*args)
+
 
 def toy_df(n_rows=20, n_cols=5, missingness=0.2, min_val=0, max_val=1,
               missing_value=np.nan, rand_seed=1234, sample_prefix=None):
@@ -74,9 +82,10 @@ def toy_df(n_rows=20, n_cols=5, missingness=0.2, min_val=0, max_val=1,
     else:
         colNames = [sample_prefix + '_' + str(i) for i in range(0, n_cols)]
         return pd.DataFrame(X, columns=colNames)
-    
+
 
 def insert_na(df, n_miss, seed):
+    """Insert a specified number of missing values into the DataFrame."""
     np.random.seed(seed)
     nrow,ncol = df.shape
     na_count = 0
@@ -94,3 +103,36 @@ def insert_na(df, n_miss, seed):
                 na_count += 1
         out_df = pd.DataFrame(tmp, index=df.index, columns=df.columns)
     return out_df
+
+
+def cluster_cols(data, k=2, random_state=0, n_init="auto"):
+    """
+    Binarize the columns of the DataFrame into two groups using K-means
+    clustering (K=2). Note that the value of K is fixed and only supports
+    two clusters.
+
+    Missing values will be replaced with zero, while non-missing values will
+    be replaced with one. K-means clustering (K=2) will then be applied to
+    the columns to group samples with similar missing patterns.
+    """
+    #key is groupID, value is a list of samples (i.e., column names)
+    group = {} 
+    df = data.copy()
+    names = df.columns
+    #replace non missing values with 1
+    df = df.mask(df.notna(), 1)
+    #replace missing values with 0
+    df = df.fillna(0)
+    #transpose df, since we want to cluster columns
+    df = df.T
+
+    # Initialize KMeans with desired number of clusters (k)
+    kmeans = KMeans(n_clusters=k, random_state=random_state, n_init=n_init).fit(df)
+    labels = [str(i) for i in kmeans.labels_]
+
+    for i,j in zip(names, labels):
+        if j not in group:
+            group[j] = [i]
+        else:
+            group[j].append(i)
+    return group
