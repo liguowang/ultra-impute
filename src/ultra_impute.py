@@ -1196,7 +1196,6 @@ class MissFiller:
     
             # predict
             g0_all_NA[g0_samples] = regr_multirf.predict(g0_all_NA[g1_samples]).round(decimal)
-            g0_all_NA.to_csv('g0.tsv', sep="\t")
         
         #group "g1" has missing vlaues. Use g0 to predict g1
         if len(g1_all_NA) > 0:
@@ -1221,7 +1220,6 @@ class MissFiller:
     
             # predict
             g1_all_NA[g1_samples] = regr_multirf.predict(g1_all_NA[g0_samples]).round(decimal)
-            g1_all_NA.to_csv('g1.tsv', sep="\t")
         result = pd.concat([used_df_train, g0_all_NA, g1_all_NA, df_all_missing])
         print('Re-order the index as the original dataframe ...', file=sys.stderr)
         result = result.reindex_like(self.df).round(decimal)
