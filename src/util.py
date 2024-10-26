@@ -136,3 +136,43 @@ def cluster_cols(data, k=2, random_state=0, n_init="auto"):
         else:
             group[j].append(i)
     return group
+
+
+def calculate_metrics(df_true, df_pred, indices):
+    """
+    Calculates MAE, RAE, RMSE, and R-squared for given true and predicted values.
+    Args:
+        df_true : pd.DataFrame
+                DataFrame of true values.
+        df_pred : pd.DataFrame
+                DataFrame of imputed values
+        indices : List of list
+                (x,y) location of missing values
+    Returns:
+        MAE (float): Mean Absolute Error.
+        RAE (float): Relative Absolute Error
+        RMSE (float): Root Mean Squared Error.
+        MAPE (float): Mean Absolute Percentage Error
+        R2 (float): R-squared score.
+    """
+
+    y_true = np.array([df_true.to_numpy()[i][j] for i,j in indices])
+    y_pred = np.array([df_pred.to_numpy()[i][j] for i,j in indices])
+
+    #absolute errors
+    ab_errors = np.abs(y_true - y_pred)
+
+    #mean absolute error
+    MAE = ab_errors.mean()
+
+    #relative absolute error
+    RAE = ab_errors.sum()/np.sum(np.abs(y_true - np.mean(y_true)))
+
+    #root mean square error
+    RMSE = np.sqrt(np.square(ab_errors).mean())
+
+    #Mean Absolute Percentage Error
+    MAPE = np.mean(ab_errors/np.abs(y_true))
+
+    R2 = np.corrcoef(y_true, y_pred)[0][1]
+    return [float(i) for i in [MAE, RAE, MAPE, RMSE, R2]]
