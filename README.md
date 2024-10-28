@@ -6,3 +6,6 @@
  
  `$ source my_env/bin/activate`
 
+2. Install ultra-impute 
+
+`pip install git+https://github.com/liguowang/ultra-impute.git`
