@@ -16,3 +16,4 @@ src/UltraImpute.egg-info/requires.txt
 src/UltraImpute.egg-info/top_level.txt
 test/test.py
 test/test2.py
+test/test3.py

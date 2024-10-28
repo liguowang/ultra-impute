@@ -17,6 +17,7 @@ from sklearn.ensemble import RandomForestRegressor
 from sklearn.multioutput import MultiOutputRegressor
 from sklearn.model_selection import train_test_split
 from util import cluster_cols
+from scipy.stats import chi2_contingency
 
 __all__ = ["MissFiller"]
 
@@ -1224,3 +1225,41 @@ class MissFiller:
         print('Re-order the index as the original dataframe ...', file=sys.stderr)
         result = result.reindex_like(self.df).round(decimal)
         return result
+
+
+    def missing_test(self, group):
+        """
+        Test (using the Chi squared tests) if the number of missing values are
+        associated with user defined group.
+
+        Parameters
+        ----------
+        group : dict
+            Describe the group information of samples. For example:
+                {'A':["sample1", "sample2", "sample3"],
+                 'B':["sample4", "sample5", "sample6"]}
+
+        Returns
+        -------
+        result : df.DataFrame
+
+        """
+        table = {}
+        results = {}
+        group_names = sorted(group.keys())
+        for g in group_names:
+            print("Group \"%s\" contains %d samples" % (str(g), len(group[g])), file=sys.stderr)
+            samples_in_group = group[g]
+            for s in samples_in_group:
+                print("\t" + s, file=sys.stderr)
+            miss = self.df.isna().sum().sum()
+            non_miss = self.df.size - miss
+            table[g] = [miss, non_miss]
+
+        test_df = pd.DataFrame(table)
+        if test_df.size == 4:
+            out = chi2_contingency(test_df)
+            results['statistic'] = float(out.statistic)
+            results['pval'] = float(out.pvalue)
+            results['dof'] = float(out.dof)
+        return results

@@ -24,8 +24,7 @@ License: Copyright (c) 2024 The Python Packaging Authority
         OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
         SOFTWARE.
         
-Project-URL: Documentation, https://cpgtools.readthedocs.io/en/latest/index.html
-Project-URL: Repository, https://github.com/liguowang/cpgtools.git
+Project-URL: Repository, https://github.com/liguowang/ultra-impute
 Keywords: missing value,NA,imputation,impute
 Classifier: Programming Language :: Python :: 3
 Classifier: Development Status :: 4 - Beta
@@ -44,7 +43,7 @@ Requires-Dist: scipy
 Requires-Dist: scikit-learn
 Requires-Dist: fancyimpute
 
-## Install CpGtools using [pip](https://pip.pypa.io/en/stable/)
+## Install  using [pip](https://pip.pypa.io/en/stable/)
 
 1. (Optional) Create Virtual Environments (Note: `venv` is available in Python 3.3 and later. You can also use [virtualenv](https://packaging.python.org/en/latest/key_projects/#virtualenv))
 
@@ -52,22 +51,3 @@ Requires-Dist: fancyimpute
  
  `$ source my_env/bin/activate`
 
-2. Install CpGtools
-
- `$ pip install cpgtools`
- 
- or
- 
- `$ pip install git+https://github.com/liguowang/cpgtools.git`
-
-3. Upgrade
-
- `$ pip install cpgtools --upgrade`
-
-4. Uninstall
-
- `pip -y uninstall cpgtools`
-
-## Documentation
-
-https://cpgtools.readthedocs.io/en/latest/
