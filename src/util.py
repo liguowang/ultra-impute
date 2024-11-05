@@ -167,7 +167,7 @@ def calculate_metrics(df_true, df_pred, indices):
 
     #mean absolute error
     MNAE = ab_errors.mean()
-    MDAE = ab_errors.median()
+    MDAE = np.median(ab_errors)
 
     #relative absolute error
     RAE = ab_errors.sum()/np.sum(np.abs(y_true - np.mean(y_true)))
