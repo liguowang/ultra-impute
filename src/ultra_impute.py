@@ -30,14 +30,13 @@ class MissFiller:
 
     def __init__(self, data, prefix=None):
         """
-        The input must be one of the following types: pd.DataFrame, np.ndarray,
-        or dict of lists.
+        The input must be: pd.DataFrame, np.ndarray, or dict of lists.
         
         Parameters
         ----------
         prefix : str
             Prefix to be added to column names. This is only applicable when
-            the input is an np.ndarray
+            the input is an np.ndarray.
             
         Examples
         --------
@@ -73,29 +72,8 @@ class MissFiller:
         2  10   NaN  12.0  13
         3  15  16.0  17.0  18
         4  20  21.0  22.0  23
-        >>> mf2.df
-              0     1     2     3
-        0   0.0   1.0   NaN   3.0
-        1   5.0   6.0   7.0   8.0
-        2  10.0   NaN  12.0  13.0
-        3  15.0  16.0  17.0  18.0
-        4  20.0  21.0  22.0  23.0
-        >>> mf3.df
-            A     B     C   D
-        0   0   1.0   NaN   3
-        1   5   6.0   7.0   8
-        2  10   NaN  12.0  13
-        3  15  16.0  17.0  18
-        4  20  21.0  22.0  23
-        >>> mf4.df
-              A    B      C     D
-        0   0.0   1.0   NaN   3.0
-        1   5.0   6.0   7.0   8.0
-        2  10.0   NaN  12.0  13.0
-        3  15.0  16.0  17.0  18.0
-        4  20.0  21.0  22.0  23.0
-
         """
+        
         if isinstance(data, pd.DataFrame):
             self.df = data
         elif isinstance(data, np.ndarray) and data.ndim == 2:
@@ -1215,7 +1193,6 @@ class MissFiller:
         #group "g0" has missing vlaues. Use g1 to predict g0
         print("Predict missing values in group \"%s\"" % group_names[0], file=sys.stderr)
         for i in list(range(niter)):
-            print("Iteration %d" % i, file=sys.stderr)
             if len(g0_all_NA) > 0:
                 X_train, X_test, y_train, y_test = train_test_split(
                 g1_train, g0_train, 
@@ -1228,7 +1205,7 @@ class MissFiller:
                 # Check the prediction score
                 score = model.score(X_test, y_test)
                 print(
-                    "The prediction score (coefficient of determination) is {:.2f}%".format(score*100), file=sys.stderr)
+                    "Iter %d: the prediction score is %.2f.%%" % (i, round(score*100, 2)), file=sys.stderr)
         
                 # predict
                 if i == 0:
@@ -1240,7 +1217,6 @@ class MissFiller:
         #group "g1" has missing vlaues. Use g0 to predict g1
         print("Predict missing values in group \"%s\"" % group_names[1], file=sys.stderr)
         for i in list(range(niter)):
-            print("Iteration %d" % i, file=sys.stderr)
             if len(g1_all_NA) > 0:
                 X_train, X_test, y_train, y_test = train_test_split(
                 g0_train, g1_train, 
@@ -1253,7 +1229,7 @@ class MissFiller:
                 # Check the prediction score
                 score = model.score(X_test, y_test)
                 print(
-                    "Iteration %d: the prediction score is %f.%%" % (i, round(score*100, 2)), file=sys.stderr)
+                    "Iter %d: the prediction score is %.2f.%%" % (i, round(score*100, 2)), file=sys.stderr)
         
                 # predict
                 if i == 0:
