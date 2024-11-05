@@ -150,11 +150,13 @@ def calculate_metrics(df_true, df_pred, indices):
         indices : List of list
                 (x,y) location of missing values
     Returns:
-        MAE (float): Mean Absolute Error.
-        RAE (float): Relative Absolute Error
-        RMSE (float): Root Mean Squared Error.
-        MAPE (float): Mean Absolute Percentage Error
-        R2 (float): R-squared score.
+        List
+            MNAE (float): Mean Absolute Error.
+            MDAE (float): Median Absolute Error.
+            RAE (float): Relative Absolute Error
+            RMSE (float): Root Mean Squared Error.
+            MAPE (float): Mean Absolute Percentage Error
+            R2 (float): R-squared score.
     """
 
     y_true = np.array([df_true.to_numpy()[i][j] for i,j in indices])
@@ -164,7 +166,8 @@ def calculate_metrics(df_true, df_pred, indices):
     ab_errors = np.abs(y_true - y_pred)
 
     #mean absolute error
-    MAE = ab_errors.mean()
+    MNAE = ab_errors.mean()
+    MDAE = ab_errors.median()
 
     #relative absolute error
     RAE = ab_errors.sum()/np.sum(np.abs(y_true - np.mean(y_true)))
@@ -176,27 +179,23 @@ def calculate_metrics(df_true, df_pred, indices):
     MAPE = np.mean(ab_errors/np.abs(y_true))
 
     R2 = np.corrcoef(y_true, y_pred)[0][1]
-    return [float(i) for i in [MAE, RAE, MAPE, RMSE, R2]]
+    return [float(i) for i in [MNAE, MDAE, RAE, MAPE, RMSE, R2]]
 
-import bz2
-import gzip
-from urllib.request import urlopen
-from subprocess import Popen, PIPE
+def calculate_errors(df_true, df_pred, indices):
+    """
+    Calculates errors (pred - true)
+    Args:
+        df_true : pd.DataFrame
+                DataFrame of true values.
+        df_pred : pd.DataFrame
+                DataFrame of imputed values
+        indices : List of list
+                (x,y) location of missing values
+    Returns:
+        np.array
+    """
+    y_true = np.array([df_true.to_numpy()[i][j] for i,j in indices])
+    y_pred = np.array([df_pred.to_numpy()[i][j] for i,j in indices])
 
-def nopen(f, mode="rb"):
-        if not isinstance(f, str):
-                return f
-        if f.startswith("|"):
-                p = Popen(f[1:], stdout=PIPE, stdin=PIPE, shell=True)
-                if mode[0] == "r": return p.stdout
-                return p
-        return {"r": sys.stdin, "w": sys.stdout}[mode[0]] if f == "-" \
-                else gzip.open(f, mode) if f.endswith((".gz", ".Z", ".z")) \
-                else bz2.BZ2File(f, mode) if f.endswith((".bz", ".bz2", ".bzip2")) \
-                else urlopen(f) if f.startswith(("http://", "https://","ftp://")) \
-                else open(f, mode)
-
-
-def reader(fname):
-        for l in nopen(fname):
-                yield l.decode('utf8').strip().replace("\r", "")
+    errors = y_pred - y_true
+    return errors
