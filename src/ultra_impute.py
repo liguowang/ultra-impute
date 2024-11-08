@@ -19,6 +19,10 @@ from sklearn.model_selection import train_test_split
 from sklearn.neighbors import KNeighborsRegressor
 from sklearn.svm import LinearSVR
 
+from keras.models import Sequential
+from keras.layers import Dense
+from tensorflow.keras import Input
+from keras.metrics import RootMeanSquaredError
 
 from util import cluster_cols
 from scipy.stats import chi2_contingency
@@ -1077,7 +1081,7 @@ class MissFiller:
 
     def fill_more(self, group=None, decimal=5, initial_model = 'Buck',
                   second_model = 'RF', niter = 10, seed=100, n_proc=8,
-                  train_size=0.75):
+                  train_size=0.75, epochs = 100):
         """
         
 
@@ -1093,17 +1097,33 @@ class MissFiller:
            "Number of decimal places to round. The default is 5.
         initial_model : {'Buck', 'KNN', 'MICE', 'RF'}
             Model used for initial imputation of the random missings.
-        second_model : {'RF', 'KNN', 'SVR'}
-            Model used for imputing the block missings.
+                Buck : Buck's method
+                KNN : K-Nearest Neighbors
+                MICE : Multiple Imputation by Chained Equations
+                RF : Random Forest
+        second_model : {'RF', 'KNN', 'SVR', 'DNN'}
+            Model used for imputing the blocky/systematic missings.
+                RF : Random Forest
+                KNN : K-Nearest Neighbors
+                SVR : Support Vector Regression
+                DNN : Deep Neural network
+        
+        Below parameters are for {'RF', 'KNN', 'SVR'}
         niter : int
             Repeating times of the secondary imputation.
         seed : int, optional
-            Seed used to initialize a pseudorandom number generator. The default is 1234.
+            Seed used to initialize a pseudorandom number generator.
+            The default is 1234.
         n_proc : int, optional
             Number of processors to use. The default is 8.
         train_size : float, optional
             Fraction of samples used as training dataset.Used to split the
             samples into "training" and "testing". The default is 0.75.
+        
+        Below parameters are for "DNN"
+        epochs : int, optional
+            the total number of iterations of all the training data in one
+            cycle for training the Deep Neural network model.
 
         Returns
         -------
@@ -1176,68 +1196,113 @@ class MissFiller:
         g1_train = used_df_train[g1_samples]
         
         # secondary imputation (handle those "block mising")
-        if second_model == 'RF':
-            model = MultiOutputRegressor(
-                RandomForestRegressor(max_depth=30, random_state=seed),
-                n_jobs=n_proc)
-        elif  second_model == 'KNN':
-            model = MultiOutputRegressor(
-                KNeighborsRegressor(n_neighbors=5, n_jobs = n_proc),
-                n_jobs=n_proc)
-        elif  second_model == 'SVR':
-            model = MultiOutputRegressor(
-                LinearSVR(),
-                n_jobs=n_proc)
-            
-        
-        #group "g0" has missing vlaues. Use g1 to predict g0
-        print("Predict missing values in group \"%s\"" % group_names[0], file=sys.stderr)
-        for i in list(range(niter)):
-            if len(g0_all_NA) > 0:
+        if  second_model == 'DNN':
+                print("Predict missing values in group \"%s\" using deep neural network" % group_names[0], file=sys.stderr)
+                input_dim = g1_train.shape[1]
+                output_dim = g0_train.shape[1]
+                print("Split data into training and testing ...", file = sys.stderr)
                 X_train, X_test, y_train, y_test = train_test_split(
                 g1_train, g0_train, 
-                train_size=train_size, random_state=seed + i
+                train_size=train_size, random_state=seed
                 )
-                
-                # Fit on the train data
-                model.fit(X_train, y_train)
-                
-                # Check the prediction score
-                score = model.score(X_test, y_test)
-                print(
-                    "Iter %d: the prediction score is %.2f.%%" % (i, round(score*100, 2)), file=sys.stderr)
-        
-                # predict
-                if i == 0:
-                    pred = model.predict(g0_all_NA[g1_samples])
-                else:
-                    pred = (pred + model.predict(g0_all_NA[g1_samples]))/2
+                model = Sequential()
+                model.add(Input(shape=(input_dim,)))
+                model.add(Dense(48, kernel_initializer='he_uniform', activation='relu'))
+                model.add(Dense(output_dim, kernel_initializer='he_uniform', activation='linear'))
+                model.summary()
+                model.compile(loss='mae', optimizer='adam', metrics=[RootMeanSquaredError])
+                model.fit(X_train, y_train, verbose=0, epochs=epochs)
+                results = model.evaluate(X_test, y_test)
+                print("Test MAE loss, test RMSE:", results)
+                #fit model using all available data
+                model.fit(g1_train, g0_train, verbose=0, epochs=epochs)
+                pred = model.predict(g0_all_NA[g1_samples])
                 g0_all_NA[g0_samples] = pred.round(decimal)
-            
-        #group "g1" has missing vlaues. Use g0 to predict g1
-        print("Predict missing values in group \"%s\"" % group_names[1], file=sys.stderr)
-        for i in list(range(niter)):
-            if len(g1_all_NA) > 0:
+
+                print("Predict missing values in group \"%s\" using deep neural network" % group_names[1], file=sys.stderr)
+                input_dim = g0_train.shape[1]
+                output_dim = g1_train.shape[1]
+                print("Split data into training and testing ...", file = sys.stderr)
                 X_train, X_test, y_train, y_test = train_test_split(
                 g0_train, g1_train, 
-                train_size=train_size, random_state=seed + i
+                train_size=train_size, random_state=seed
                 )
-                
-                # Fit on the train data
-                model.fit(X_train, y_train)
-                
-                # Check the prediction score
-                score = model.score(X_test, y_test)
-                print(
-                    "Iter %d: the prediction score is %.2f.%%" % (i, round(score*100, 2)), file=sys.stderr)
-        
-                # predict
-                if i == 0:
-                    pred = model.predict(g1_all_NA[g0_samples])
-                else:
-                    pred = (pred + model.predict(g1_all_NA[g0_samples]))/2
+                model2 = Sequential()
+                model2.add(Input(shape=(input_dim,)))
+                model2.add(Dense(48, kernel_initializer='he_uniform', activation='relu'))
+                #model2.add(Dense(48, input_shape=(input_dim,), kernel_initializer='he_uniform', activation='relu'))
+                model2.add(Dense(output_dim, kernel_initializer='he_uniform', activation='linear'))
+                model2.summary()
+                model2.compile(loss='mae', optimizer='adam', metrics=[RootMeanSquaredError])
+                model.fit(X_train, y_train, verbose=0, epochs=epochs)
+                results = model.evaluate(X_test, y_test)
+                print("Test MAE loss, test RMSE:", results)
+                #fit model using all available data
+                model2.fit(g0_train, g1_train, verbose=0, epochs=epochs)
+                pred = model2.predict(g1_all_NA[g0_samples])
                 g1_all_NA[g1_samples] = pred.round(decimal)
-        
+        elif second_model in ['RF', 'KNN', 'SVR']:
+            if second_model == 'RF':
+                model = MultiOutputRegressor(
+                    RandomForestRegressor(max_depth=30, random_state=seed),
+                    n_jobs=n_proc)
+            elif  second_model == 'KNN':
+                model = MultiOutputRegressor(
+                    KNeighborsRegressor(n_neighbors=5, n_jobs = n_proc),
+                    n_jobs=n_proc)
+            elif  second_model == 'SVR':
+                model = MultiOutputRegressor(
+                    LinearSVR(),
+                    n_jobs=n_proc)
+                    
+            #group "g0" has missing vlaues. Use g1 to predict g0
+            print("Predict missing values in group \"%s\" using %s" % (group_names[0], second_model), file=sys.stderr)
+            for i in list(range(niter)):
+                if len(g0_all_NA) > 0:
+                    X_train, X_test, y_train, y_test = train_test_split(
+                    g1_train, g0_train, 
+                    train_size=train_size, random_state=seed + i
+                    )
+                    
+                    # Fit on the train data
+                    model.fit(X_train, y_train)
+                    
+                    # Check the prediction score
+                    score = model.score(X_test, y_test)
+                    print(
+                        "Iter %d: the prediction score is %.2f.%%" % (i, round(score*100, 2)), file=sys.stderr)
+            
+                    # predict
+                    if i == 0:
+                        pred = model.predict(g0_all_NA[g1_samples])
+                    else:
+                        pred = (pred + model.predict(g0_all_NA[g1_samples]))/2
+                    g0_all_NA[g0_samples] = pred.round(decimal)
+                
+            #group "g1" has missing vlaues. Use g0 to predict g1
+            print("Predict missing values in group \"%s\" using %s" % (group_names[1], second_model), file=sys.stderr)
+            for i in list(range(niter)):
+                if len(g1_all_NA) > 0:
+                    X_train, X_test, y_train, y_test = train_test_split(
+                    g0_train, g1_train, 
+                    train_size=train_size, random_state=seed + i
+                    )
+                    
+                    # Fit on the train data
+                    model.fit(X_train, y_train)
+                    
+                    # Check the prediction score
+                    score = model.score(X_test, y_test)
+                    print(
+                        "Iter %d: the prediction score is %.2f.%%" % (i, round(score*100, 2)), file=sys.stderr)
+            
+                    # predict
+                    if i == 0:
+                        pred = model.predict(g1_all_NA[g0_samples])
+                    else:
+                        pred = (pred + model.predict(g1_all_NA[g0_samples]))/2
+                    g1_all_NA[g1_samples] = pred.round(decimal)
+            
         
         result = pd.concat([used_df_train, g0_all_NA, g1_all_NA, df_all_missing])
         print('Re-order the index as the original dataframe ...', file=sys.stderr)
