@@ -1,4 +1,4 @@
-# Installation
+## Installation
 
 ### 1. Create Virtual Environments (Note: `venv` is available in Python 3.3 and later. You can also use [virtualenv](https://packaging.python.org/en/latest/key_projects/#virtualenv)). This step is optional.
 
@@ -19,7 +19,7 @@ or
 `pip install --upgrade git+https://github.com/liguowang/ultra-impute.git`
 
 
-# Note
+### Note
 
 You will have to run `$ source my_env/bin/activate` to activate `my_env` every time you login
 to your computer, unless you add this command to your ~/.bash_profile or ~/.bashrc file.
