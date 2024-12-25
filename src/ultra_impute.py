@@ -4,7 +4,7 @@
 Created on Thu Oct  3 21:22:56 2024
 @author: Liguo Wang (WangLiguo78@Gmail.com)
 """
-import sys
+import sys,os
 import numpy as np
 import pandas as pd
 from impyutelib import nan_indices, apply_method, random_impute, moving_window
@@ -19,6 +19,7 @@ from sklearn.model_selection import train_test_split
 from sklearn.neighbors import KNeighborsRegressor
 from sklearn.svm import LinearSVR
 
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '1' 
 from keras.models import Sequential
 from keras.layers import Dense
 from tensorflow.keras import Input
@@ -32,21 +33,14 @@ __all__ = ["MissFiller"]
 
 class MissFiller:
 
-    def __init__(self, data, prefix=None):
+    def __init__(self, data):
         """
-        The input must be: pd.DataFrame, np.ndarray, or dict of lists.
+        MissFiller can be initialized with a pandas DataFrame, numpy ndarray,
+        or dictionary. Dictionaries and ndarrays will automatically be
+        converted to a DataFrame.
         
-        Parameters
-        ----------
-        prefix : str
-            Prefix to be added to column names. This is only applicable when
-            the input is an np.ndarray.
-            
         Examples
         --------
-        MissFiller can be initiated using dictionary, numpy ndarray or pandas 
-        DataFrame. Dictionary and ndarray will be converted into DataFrame.
-
         >>> d1 = {
             'A':[0, 5, 10, 15, 20],
             'B': [1, 6, np.nan, 16, 21],
@@ -81,12 +75,7 @@ class MissFiller:
         if isinstance(data, pd.DataFrame):
             self.df = data
         elif isinstance(data, np.ndarray) and data.ndim == 2:
-            if prefix is None or len(prefix) == 0:
-                self.df = pd.DataFrame(data)
-            else:
-                ncols = data.shape[1]
-                colNames = [prefix + str(i).zfill(len(str(ncols))) for i in range(0, ncols)]
-                self.df = pd.DataFrame(data, columns=colNames)
+            self.df = pd.DataFrame(data)
         elif isinstance(data, dict) and isinstance(next(iter(data.values())), list):
             self.df = pd.DataFrame(data)
         else:
@@ -106,8 +95,6 @@ class MissFiller:
 
     def get_dataframe(self):
         """
-        Returns pd.DataFrame object.
-        
         Returns
         -------
         pd.DataFrame
@@ -118,13 +105,13 @@ class MissFiller:
     def get_na_indices(self):
         """
         Returns the coordinates (x, y) of the missing values.
-
+        
         Examples
         --------
         >>> mf1.get_na_indices()
         array([[0, 2],
               [2, 1]])
-
+        
         Returns
         -------
         Array of lists.
@@ -134,7 +121,7 @@ class MissFiller:
 
     def count_na(self):
         """
-        Counts the total number of missing values in the DataFrame.
+        Calculates the total number of missing values in the DataFrame.
         
         Returns
         -------
@@ -146,7 +133,7 @@ class MissFiller:
 
     def count_row_na(self):
         """
-        Counts the number of missing values for each row.
+        Counts the missing values in each row.
 
         Examples
         --------
@@ -161,15 +148,15 @@ class MissFiller:
         Returns
         -------
         pd.Series
-            Number of missing values per row.
+            Missing values per row.
         """
         return self.df.isna().sum(axis=1)
 
 
     def count_col_na(self):
         """
-        Counts the number of missing values for each column.
-
+        Counts the missing values in each column.
+        
         Examples
         --------
         >>> mf1.count_col_na()
@@ -177,11 +164,11 @@ class MissFiller:
         B    1
         C    1
         D    0
-
+        
         Returns
         -------
         pd.Series
-            Number of missing values per column.
+            Missing values per column.
         """
         return self.df.isna().sum(axis=0)
 
@@ -196,13 +183,13 @@ class MissFiller:
             0: remove rows with missing values.
             1: remove columns with missing values. 
             Default is 0.
-
+        
         n_non_miss : {'all', float}
             Specifies the required number of non-missing values.
             If 0 < n_non_miss < 1, it is interpreted as a fraction. For
             example, if n_non_miss = 0.85, rows or columns with up to 15%
             missing values will be removed.
-
+        
         Examples
         --------
         >>> mf1.remove_na()
@@ -217,7 +204,7 @@ class MissFiller:
         2  10  13
         3  15  18
         4  20  23
-
+        
         Returns
         -------
         pd.DataFrame
@@ -250,7 +237,7 @@ class MissFiller:
         ----------
         n_miss : int
             Number of missign values inserted into the dataframe.
-
+        
         seed : int
             Seed to initiate a random number generator.
         
@@ -299,7 +286,7 @@ class MissFiller:
         """
         Replaces missing values with a specified value (can be an integer,
         float, or string).
-
+        
         Examples
         --------
         >>> mf1.replace_na(100)
@@ -309,7 +296,7 @@ class MissFiller:
         2  10  100.0   12.0  13
         3  15   16.0   17.0  18
         4  20   21.0   22.0  23
-
+        
         Returns
         -------
         pd.DataFrame
@@ -330,7 +317,7 @@ class MissFiller:
             1: calculate mean/median/min/max or find the forward-fill/back-fill
                value along the rows.
             The default is 0.
-
+        
         method : {'mean', 'median', 'min', 'max', 'bfill', 'ffill'}
             mean, median, min, max: 
                 refers to pandas's documentations.
@@ -348,7 +335,7 @@ class MissFiller:
                 If axis=1, "previous" refers to the value to the left of the 
                 missing value. Thus, missing values on the leftmost side of 
                 the row will not be filled.
-
+        
         Examples
         --------
         >>> mf1.fill_trend(method='mean')
@@ -372,7 +359,7 @@ class MissFiller:
             2  10  16.0  12.0  13
             3  15  16.0  17.0  18
             4  20  21.0  22.0  23
-
+        
         Returns
         -------
         pd.DataFrame
@@ -392,14 +379,14 @@ class MissFiller:
         """
         Replaces missing values with random values selected from the
         corresponding row or column.
-
+        
         Parameters
         ----------
         axis : {0, 1}
             0: chosen a random value from the column.
             1: chosen a random value from the row.
             Default is 0.
-
+        
         Examples
         --------
         >>> mf1.fill_rand()
@@ -409,7 +396,7 @@ class MissFiller:
         2  10.0  21.0  12.0  13.0
         3  15.0  16.0  17.0  18.0
         4  20.0  21.0  22.0  23.0
-
+        
         Returns
         -------
         pd.DataFrame
@@ -427,14 +414,14 @@ class MissFiller:
         """
         Replaces missing values with values calculated from moving windows
         along rows or columns.
-
+        
         Parameters
         ----------
         axis : {0, 1}
             0: Apply moving windows along the columns.
             1: Apply moving windows along the rows.
             Default is 0.
-
+        
         nindex: int
             Null index. Index of the missing value inside the moving average
             window. This is useful if you wanted to make the imputed value
@@ -443,18 +430,18 @@ class MissFiller:
                 missing value.
             -1: only take the average of values from the left side of the
                 missing value.
-
+        
         wsize: int
             Size of the moving average window/area of values being used
             for each local imputation. This number includes the missing value.
-
+        
         errors: {"raise", "coerce", "ignore"}
             Errors will occur with the indexing of the windows - for example 
             if there is a nan at data[x][0] and `nindex` is set to -1 or there
             is a nan at data[x][-1] and `nindex` is set to 0. `"raise"` will
             raise an error, `"coerce"` will try again using an nindex set to
             the middle and `"ignore"` will just leave it as a nan.
-
+        
         Examples
         --------
         >>> mf1.fill_mw()
@@ -471,7 +458,7 @@ class MissFiller:
         2  10.0  11.666667  12.000000  13.0
         3  15.0  16.000000  17.000000  18.0
         4  20.0  21.000000  22.000000  23.0
-
+        
         Returns
         -------
         pd.DataFrame
@@ -496,7 +483,7 @@ class MissFiller:
         to construct a KDTree to identify the nearest neighbors. After finding
         the k nearest neighbors, compute a weighted average of these neighbors
         based on their distances to perform the final imputation.
-
+        
         Parameters
         ----------
         axis : int, optional
@@ -876,6 +863,7 @@ class MissFiller:
         NOTE:
         ----
         This process is very slow, especially for larger dataset.
+        You will get overflow error for large matrix.
         """
         X_filled = NuclearNormMinimization(require_symmetric_solution = require_symmetric_solution, 
                                            min_value = min_value,
@@ -1079,7 +1067,7 @@ class MissFiller:
         out_df = pd.DataFrame(X_filled, index=self.df.index, columns=self.df.columns)
         return out_df
 
-    def fill_more(self, group=None, decimal=5, initial_model = 'Buck',
+    def fill_morel(self, group=None, decimal=5, initial_model = 'Buck',
                   second_model = 'RF', niter = 10, seed=100, n_proc=8,
                   train_size=0.75, epochs = 100):
         """
