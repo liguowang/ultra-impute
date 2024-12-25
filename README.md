@@ -52,4 +52,4 @@ to your computer, unless you add this command to your ~/.bash_profile or ~/.bash
 | `fill_IterativeImputer()`| Same as scikit-learn's `IterativeImputer` method. |
 | `fill_MatrixFactorization()`| Same as fancyimpute's `MatrixFactorization` method. |
 | `fill_RF()`| Imputes missing data using Random Forest. |
-| `fill_more()`| Imputes missing values using DNN or multi-output regressors (KNN, RF, SVR). |
+| `fill_morel()`| Imputes missing values using DNN or multi-output regressors (KNN, RF, SVR). |
