@@ -1188,6 +1188,7 @@ class MissFiller:
                 print("Predict missing values in group \"%s\" using deep neural network" % group_names[0], file=sys.stderr)
                 input_dim = g1_train.shape[1]
                 output_dim = g0_train.shape[1]
+                n_neurons = int((input_dim + output_dim)/2) + 1
                 print("Split data into training and testing ...", file = sys.stderr)
                 X_train, X_test, y_train, y_test = train_test_split(
                 g1_train, g0_train, 
@@ -1195,7 +1196,7 @@ class MissFiller:
                 )
                 model = Sequential()
                 model.add(Input(shape=(input_dim,)))
-                model.add(Dense(48, kernel_initializer='he_uniform', activation='relu'))
+                model.add(Dense(n_neurons, kernel_initializer='he_uniform', activation='relu'))
                 model.add(Dense(output_dim, kernel_initializer='he_uniform', activation='linear'))
                 model.summary()
                 model.compile(loss='mae', optimizer='adam', metrics=[RootMeanSquaredError])
@@ -1210,6 +1211,7 @@ class MissFiller:
                 print("Predict missing values in group \"%s\" using deep neural network" % group_names[1], file=sys.stderr)
                 input_dim = g0_train.shape[1]
                 output_dim = g1_train.shape[1]
+                n_neurons = int((input_dim + output_dim)/2) + 1
                 print("Split data into training and testing ...", file = sys.stderr)
                 X_train, X_test, y_train, y_test = train_test_split(
                 g0_train, g1_train, 
@@ -1217,7 +1219,7 @@ class MissFiller:
                 )
                 model2 = Sequential()
                 model2.add(Input(shape=(input_dim,)))
-                model2.add(Dense(48, kernel_initializer='he_uniform', activation='relu'))
+                model2.add(Dense(n_neurons, kernel_initializer='he_uniform', activation='relu'))
                 #model2.add(Dense(48, input_shape=(input_dim,), kernel_initializer='he_uniform', activation='relu'))
                 model2.add(Dense(output_dim, kernel_initializer='he_uniform', activation='linear'))
                 model2.summary()
