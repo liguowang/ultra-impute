@@ -43,6 +43,7 @@ The **CREs** were compiled from several major genomic annotation databases:
 #### 6. RefSeq Functional Elements
 - **Description:** NCBI RefSeq curated collection of known and predicted functional elements.  
 - **Total Regions:** 5,756  
+- **Data last updated:** 2017-11-29
 - **Source:** [NCBI RefSeq Functional Elements](https://www.ncbi.nlm.nih.gov/refseq/functionalelements/)
 
 #### 7. VISTA Enhancers
