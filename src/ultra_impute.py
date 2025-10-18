@@ -25,8 +25,11 @@ from keras.layers import Dense
 from tensorflow.keras import Input
 from keras.metrics import RootMeanSquaredError
 
-from util import cluster_cols
+from util import cluster_cols,buildIntervalTree,findIntervals,weighted_mean
+from ireader import reader
 from scipy.stats import chi2_contingency
+
+
 
 __all__ = ["MissFiller"]
 
@@ -729,7 +732,7 @@ class MissFiller:
         input_df = self.df
 
         imputer = KNNImputer(**kwargs)
-        #impute on rows
+        #use row mean of neighbors
         if axis == 1:
             input_df = input_df.T
             after = imputer.fit_transform(input_df)
@@ -1083,7 +1086,7 @@ class MissFiller:
             if set to None, using K-means to detect groups.
         decimal : int, optional
            "Number of decimal places to round. The default is 5.
-        initial_model : {'Buck', 'KNN', 'MICE', 'RF'}
+        initial_model : {'Buck', 'KNN', 'MICE', 'RF', None}
             Model used for initial imputation of the random missings.
                 Buck : Buck's method
                 KNN : K-Nearest Neighbors
@@ -1168,7 +1171,6 @@ class MissFiller:
         tmp = MissFiller(used_df_train)
         if tmp.na_count > 0:
             print("There are %d sporadic missing values." %  tmp.na_count, file=sys.stderr)
-            print("Impute sporadic missing values using Buck's method ...", file=sys.stderr)
             if initial_model == 'Buck':
                 print("Initial imputing using Buck's method ...", file=sys.stderr)
                 used_df_train = tmp.fill_Buck()
@@ -1336,3 +1338,164 @@ class MissFiller:
             results['pval'] = float(out.pvalue)
             results['dof'] = float(out.dof)
         return results
+
+
+    def fill_gKNN(self, gfile, up_stream = 100, down_stream = 100, same_CRE = False,
+                        method = 'WA', ndigit = 5, verbose=True):
+        """
+
+        Parameters
+        ----------
+        gfile : str
+            Path to the genomic information file containing all CpG sites 
+            (450K + 850K + EPICv2). This file must include at least five columns:
+            chrom, start, end, cpg_id, and CRE (Candidate Regulatory Elements).
+            # Example of gfile. Must have at least 5 columns
+            # chr1    611603  611604  cg17866181      N/A
+            # chr1    629090  629091  cg25018832      GeneHancer_chr1:628960:635053
+            # chr1    629120  629121  cg26679879      ENCODE_DNaseI_chr1:629120:629350
+        
+        up_stream : int, optional
+            Upstream distance (in base pairs) from the imputed CpG site to
+            consider neighboring CpGs.
+            Default is 100
+        down_stream : int, optional
+            Downstram distance (in base pairs) from the imputed CpG site to
+            consider neighboring CpGs.
+            Default is 100
+        same_CRE : bool, optional
+            If True, only CpGs located within the same Candidate Regulatory
+            Element (CRE) are used for imputation.
+            Default is False.
+        method : str, optional
+            Imputation method for estimating the beta value. Must be one of:
+            * A: simple aveerage
+            * WA: weighted average (weights are inversely proportional to 
+                  genomic distance from the target CpG)
+            Default is 'WA'.
+        ndigit : int, optional
+            Number of digits after decimal point. 
+            Default is 5.
+        verbose : bool, optional
+            If True, print detailed message to stderr.
+            Default is 5.
+            
+        Returns
+        -------
+        out_df : DataFrame
+            DESCRIPTION.
+
+        """
+        #information of input dataframe
+        input_df = self.df
+        row_names = input_df.index # List of probe/CpG IDs (row names)
+        col_names = input_df.columns # List of sample IDs (column names)
+        
+        # Build tree from gfile
+        if verbose:
+            print("Build interval tree from %s ..." % gfile, file=sys.stderr)
+        cpg_tree = buildIntervalTree(gfile)
+        
+        #tmp = cpg_tree['chr1'].upstream_of_interval(Interval(10849, 10850), 2)
+        #print(tmp)
+        # read information from gfile
+        cpg_database = {}
+        if verbose:
+            print("Reading %s ..." % gfile, file=sys.stderr)
+        for l in reader(gfile):
+            if l.startswith('#'):
+                if verbose: print("Skip %s" % l, file=sys.stderr)
+                continue
+            f = l.split()
+            if len(f) < 5:
+                if verbose: print("Skip %s" % l, file=sys.stderr)
+                continue
+            chrom = f[0]
+            start = int(f[1])
+            end = int(f[2])
+            cpg_id = f[3]
+            if f[4] == 'N/A':
+                CREs = set()
+            else:
+                CREs = set(f[4].split(','))
+            cpg_database[cpg_id] = [chrom, start, end, CREs]
+            
+        # list of index where the entire row all have missing values
+        all_na_rows = list(input_df[input_df.isnull().all(axis=1)].index)
+        if verbose:
+            print("Found a total of %d ROWs with all missing values" % len(all_na_rows), file=sys.stderr)
+        
+        #################################################
+        # get gKNN for CpGs whose entire row is missing
+        #################################################
+        # key is CpG with NA, value is set of CpGs that used to impute
+        if verbose:print("Search for genomic neighbours ...", file=sys.stderr)
+        candidates = {}
+        orphan = set()
+        for na_row in all_na_rows:
+            if na_row not in candidates:
+                candidates[na_row] = set()
+            if na_row not in cpg_database:
+                orphan.add(na_row)
+                continue
+            # get some information about the target CpG
+            tmp = cpg_database[na_row]
+            na_chrom = tmp[0]
+            na_start = tmp[1]
+            na_end = tmp[2]
+            search_start = na_start - up_stream
+            if search_start < 0: search_start = 0
+            search_end = na_end + down_stream
+            # Whether to require candidate CpGs to locate in the same CRE 
+            if same_CRE:
+                na_CREs = tmp[3]
+            else:
+                na_CREs = None
+            knn_cgids = findIntervals(na_chrom, search_start, search_end, cpg_tree, na_CREs)
+
+            # below will fiter knn_cgids
+            for knn_cgid in knn_cgids:
+                if knn_cgid == na_row: # remove itself
+                    continue
+                # make sure the candicate CpG exixt in the input file
+                if knn_cgid not in row_names:
+                    continue
+                if knn_cgid in all_na_rows:
+                    continue
+                candidates[na_row].add(knn_cgid)
+        if verbose:
+            print("Target_CpG_ID\tNeighbours")
+            for c in candidates:
+                print(c + '\t' + ','.join(candidates[c]))
+        
+        #################################################
+        # Impute
+        #################################################
+        na_locations = nan_indices(input_df.to_numpy())
+        if verbose:
+            print("Imputing a total of %d missing values one by one ..." % len(na_locations), file=sys.stderr)
+        for i,j in na_locations:
+            knn_betas = [] # beta values of candidate CpGs used to impute
+            knn_dists = [] # distance of candidate CpGs used to impute
+            # The location of original CpG with missing value
+            na_cgid = row_names[i]
+            na_sid = col_names[j]
+            # missing_cpg must be in candidates
+            if na_cgid not in candidates:
+                continue
+            # missing_cpg must have gKNNs
+            if len(candidates[na_cgid]) == 0:
+                continue
+            for knn_cgid in candidates[na_cgid]:
+                # make sure the candicate CpG has beta value (not N/A)
+                beta = input_df.loc[knn_cgid, na_sid]
+                if np.isnan(beta):
+                    continue
+                dist = abs(cpg_database[knn_cgid][1] - cpg_database[na_cgid][1]) + 1
+                knn_betas.append(beta)
+                knn_dists.append(dist)
+            if method == 'A':
+                input_df.loc[na_cgid, na_sid] = np.round(np.mean(knn_betas), ndigit)
+            elif method == 'WA':
+                input_df.loc[na_cgid, na_sid] = np.round(weighted_mean(knn_betas, knn_dists), ndigit)
+        return input_df

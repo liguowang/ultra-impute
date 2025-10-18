@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 
 #Project's meta data
 [project]
-version = "2.0.0"
+version = "2.0.2"
 name = "UltraImpute"
 authors = [
   {name="Liguo Wang", email="wangliguo78@gmail.com"},
@@ -26,6 +26,8 @@ dependencies = [
 	"fancyimpute",
 	"tensorflow",
 	"keras",
+	"combat",
+	"bx-python",
 ]
 
 classifiers=[

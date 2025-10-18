@@ -4,7 +4,9 @@ from functools import wraps
 import numpy as np
 import pandas as pd
 from sklearn.cluster import KMeans
-
+#from combat.pycombat import pycombat
+from ireader import reader
+from bx.intervals import Intersecter, Interval
 
 # Things that get exposed from * import
 __all__ = [
@@ -199,3 +201,76 @@ def calculate_errors(df_true, df_pred, indices):
 
     errors = y_pred - y_true
     return errors
+
+def weighted_mean(v, d):
+    """
+    To calculate a mean weighted by distance. Given a CpG with missing value,
+    its  beta value will be imputed from upstream m CpGs and downstream 
+    n CpGs. The mean beta value of these (m + n) CpGs will be weighted by
+    the distance from this CpG. 
+    """
+    
+    values = np.array(v)     	# The values you want to average
+    distances = np.array(d)      # Distances associated with each value
+    
+    if len(values) == 0:
+        return np.nan
+    # Compute weights (inverse of distance)
+    weights = 1/distances
+    if np.sum(weights) == 0:
+        return np.nan
+    
+    # Compute weighted mean
+    s = np.sum(weights * values)/np.sum(weights)
+    return s
+
+def buildIntervalTree(bed_file, window_size = 0):
+    '''
+    Build interval tree from annotation BED file.
+    window : add this to the middle of each region.
+    '''
+    ranges={}
+    #print("Build interval tree from annotation file: %s ..." % bed_file)
+    for line in reader(bed_file):
+        if line.startswith("track"):continue
+        if line.startswith("#"):continue
+        if line.startswith('browser'):continue
+        fields = line.rstrip('\n ').split()
+        if len(fields) < 5:
+            continue
+        chrom = fields[0]
+        start = int(fields[1])
+        end = int(fields[2])
+        # Example: cg26679879,ENCODE_DNaseI_chr1:629120:629350,GeneHancer_chr1:628960:635053
+        name = fields[3] + ',' + fields[4] 
+        if chrom not in ranges:
+            ranges[chrom] = Intersecter()
+            ranges[chrom].add_interval( Interval( start, end, value=name) )
+        else:
+            ranges[chrom].add_interval( Interval( start, end, value=name) )
+    return ranges
+
+def findIntervals(chrom, start, end, obj, input_CREs):
+    '''
+    Find candicate neighboring CpGs that can be used to impute a given CpG.
+    The candicas must meet two conditions:
+        1. within the same searching window
+        2. within the same CRE
+    obj is the IntervalTree object returned by "buildIntervalTree.
+    '''
+    hits = set()
+    if chrom not in obj:
+        return hits
+    else:
+        overlaps = obj[chrom].find(start, end)
+        for o in overlaps:
+            info = o.value
+            tmp = info.split(',')
+            cg_id = tmp[0]
+            found_CREs = set(tmp[1:])
+            if input_CREs is None or len(input_CREs) == 0:
+                hits.add(cg_id)
+            else:
+                if input_CREs.intersection(found_CREs):
+                    hits.add(cg_id)
+    return hits
