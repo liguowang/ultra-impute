@@ -1340,8 +1340,9 @@ class MissFiller:
         return results
 
 
-    def fill_gKNN(self, gfile, up_stream = 100, down_stream = 100, same_CRE = False,
-                        method = 'WA', ndigit = 5, verbose=True):
+    def fill_gKNN(self, gfile, cpgfile = None, up_stream = 100, 
+                  down_stream = 100, same_CRE = False,
+                  method = 'WA', ndigit = 5, verbose=True):
         """
 
         Parameters
@@ -1354,7 +1355,10 @@ class MissFiller:
             # chr1    611603  611604  cg17866181      N/A
             # chr1    629090  629091  cg25018832      GeneHancer_chr1:628960:635053
             # chr1    629120  629121  cg26679879      ENCODE_DNaseI_chr1:629120:629350
-        
+        cpgfile : str, optional
+            A file containing NEW CpGs IDs (one per row). These new CpGs
+            will be added to the existing dataframe and their values
+            will be imputed.
         up_stream : int, optional
             Upstream distance (in base pairs) from the imputed CpG site to
             consider neighboring CpGs.
@@ -1386,9 +1390,25 @@ class MissFiller:
             DESCRIPTION.
 
         """
+
+                
         #information of input dataframe
         input_df = self.df
-        row_names = input_df.index # List of probe/CpG IDs (row names)
+
+        new_cpgs = []
+        if cpgfile:
+            if verbose:
+                print("Reading %s ..." % cpgfile, file=sys.stderr)
+            for l in open(cpgfile, 'r'):
+                l = l.strip()
+                if l.startswith('#'):continue
+                if len(l) == 0:continue
+                new_cpgs.append(l)
+            if verbose:
+                print("Add %d new CpGs ..." % len(new_cpgs), file=sys.stderr)
+                input_df = input_df.reindex(list(input_df.index) + new_cpgs)
+         
+        row_names = list(input_df.index) # List of probe/CpG IDs (row names)
         col_names = input_df.columns # List of sample IDs (column names)
         
         # Build tree from gfile
@@ -1396,8 +1416,6 @@ class MissFiller:
             print("Build interval tree from %s ..." % gfile, file=sys.stderr)
         cpg_tree = buildIntervalTree(gfile)
         
-        #tmp = cpg_tree['chr1'].upstream_of_interval(Interval(10849, 10850), 2)
-        #print(tmp)
         # read information from gfile
         cpg_database = {}
         if verbose:
@@ -1424,7 +1442,9 @@ class MissFiller:
         all_na_rows = list(input_df[input_df.isnull().all(axis=1)].index)
         if verbose:
             print("Found a total of %d ROWs with all missing values" % len(all_na_rows), file=sys.stderr)
-        
+        if len(all_na_rows) == 0:
+            return input_df
+
         #################################################
         # get gKNN for CpGs whose entire row is missing
         #################################################
