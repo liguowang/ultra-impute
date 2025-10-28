@@ -1340,8 +1340,8 @@ class MissFiller:
         return results
 
 
-    def fill_gKNN(self, gfile, cpgfile = None, up_stream = 100, 
-                  down_stream = 100, same_CRE = False,
+    def fill_gKNN(self, gfile, cpgfile = None, up_dist = 100, 
+                  down_dist = 100, up_ncpg=2, down_ncpg=2, same_CRE = False,
                   method = 'WA', ndigit = 5, verbose=True):
         """
 
@@ -1359,14 +1359,20 @@ class MissFiller:
             A file containing NEW CpGs IDs (one per row). These new CpGs
             will be added to the existing dataframe and their values
             will be imputed.
-        up_stream : int, optional
-            Upstream distance (in base pairs) from the imputed CpG site to
-            consider neighboring CpGs.
+        up_dist : int, optional
+            Searching for upstream CpGs no further than `up_dist`(in base pairs)
+            from the imputed CpG location.
             Default is 100
-        down_stream : int, optional
-            Downstram distance (in base pairs) from the imputed CpG site to
-            consider neighboring CpGs.
+        up_ncpg : int, optional
+            Searching for `up_ncpg` CpGs from upstream.
+            Default is 2
+        down_dist : int, optional
+            Searching for downstream CpGs no further than `down_dist`(in base pairs)
+            from the imputed CpG location.
             Default is 100
+        down_ncpg : int, optional
+            Searching for `down_ncpg` CpGs from downstream.
+            Default is 2
         same_CRE : bool, optional
             If True, only CpGs located within the same Candidate Regulatory
             Element (CRE) are used for imputation.
@@ -1463,15 +1469,23 @@ class MissFiller:
             na_chrom = tmp[0]
             na_start = tmp[1]
             na_end = tmp[2]
-            search_start = na_start - up_stream
-            if search_start < 0: search_start = 0
-            search_end = na_end + down_stream
+
             # Whether to require candidate CpGs to locate in the same CRE 
             if same_CRE:
                 na_CREs = tmp[3]
             else:
                 na_CREs = None
-            knn_cgids = findIntervals(na_chrom, search_start, search_end, cpg_tree, na_CREs)
+            knn_cgids = findIntervals(
+                chrom = na_chrom, 
+                obj = cpg_tree,
+                start = na_start, 
+                end = na_end,
+                up_dist = up_dist,
+                down_dist = down_dist,
+                up_CpGs = up_ncpg,
+                down_CpGs = down_ncpg,
+                input_CREs = na_CREs
+                )
 
             # below will fiter knn_cgids
             for knn_cgid in knn_cgids:

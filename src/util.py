@@ -250,7 +250,7 @@ def buildIntervalTree(bed_file, window_size = 0):
             ranges[chrom].add_interval( Interval( start, end, value=name) )
     return ranges
 
-def findIntervals(chrom, start, end, obj, input_CREs):
+def findIntervals(chrom, obj, start, end, up_dist, down_dist, up_CpGs, down_CpGs, input_CREs):
     '''
     Find candicate neighboring CpGs that can be used to impute a given CpG.
     The candicas must meet two conditions:
@@ -262,7 +262,9 @@ def findIntervals(chrom, start, end, obj, input_CREs):
     if chrom not in obj:
         return hits
     else:
-        overlaps = obj[chrom].find(start, end)
+        up_overlaps = obj[chrom].upstream_of_interval(Interval(start, end), num_intervals=up_CpGs, max_dist=up_dist)
+        down_overlaps = obj[chrom].downstream_of_interval(Interval(start, end), num_intervals=down_CpGs, max_dist=down_dist)
+        overlaps = up_overlaps + down_overlaps
         for o in overlaps:
             info = o.value
             tmp = info.split(',')
