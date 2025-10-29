@@ -202,6 +202,12 @@ def calculate_errors(df_true, df_pred, indices):
     errors = y_pred - y_true
     return errors
 
+def trimmed_mean(v, threshold=2):
+    mean = np.mean(v)
+    std_dev = np.std(v)
+    filtered_data = [x for x in v if abs((x - mean) / std_dev) < threshold]
+    return np.mean(filtered_data)
+
 def weighted_mean(v, d):
     """
     To calculate a mean weighted by distance. Given a CpG with missing value,

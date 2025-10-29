@@ -25,7 +25,8 @@ from keras.layers import Dense
 from tensorflow.keras import Input
 from keras.metrics import RootMeanSquaredError
 
-from util import cluster_cols,buildIntervalTree,findIntervals,weighted_mean
+from util import cluster_cols,buildIntervalTree,findIntervals
+from util import weighted_mean,trimmed_mean
 from ireader import reader
 from scipy.stats import chi2_contingency
 
@@ -1342,7 +1343,7 @@ class MissFiller:
 
     def fill_gKNN(self, gfile, cpgfile = None, up_dist = 100, 
                   down_dist = 100, up_ncpg=2, down_ncpg=2, same_CRE = False,
-                  method = 'WA', ndigit = 5, verbose=True):
+                  method = 'TA', ndigit = 5, drop_all_na = True, verbose=True):
         """
 
         Parameters
@@ -1379,13 +1380,17 @@ class MissFiller:
             Default is False.
         method : str, optional
             Imputation method for estimating the beta value. Must be one of:
-            * A: simple aveerage
+            * AA: simple average
             * WA: weighted average (weights are inversely proportional to 
                   genomic distance from the target CpG)
-            Default is 'WA'.
+            * TA: trimmed average. remove outliers that is 2*STD away from mean
+            Default is 'TA'
         ndigit : int, optional
             Number of digits after decimal point. 
             Default is 5.
+        drop_all_na : bool, optional
+            Remove those rows with all values are missing.
+            Default is True.
         verbose : bool, optional
             If True, print detailed message to stderr.
             Default is 5.
@@ -1528,8 +1533,16 @@ class MissFiller:
                 dist = abs(cpg_database[knn_cgid][1] - cpg_database[na_cgid][1]) + 1
                 knn_betas.append(beta)
                 knn_dists.append(dist)
-            if method == 'A':
+            if method == 'AA':
                 input_df.loc[na_cgid, na_sid] = np.round(np.mean(knn_betas), ndigit)
             elif method == 'WA':
                 input_df.loc[na_cgid, na_sid] = np.round(weighted_mean(knn_betas, knn_dists), ndigit)
+            elif method == 'TA':
+                input_df.loc[na_cgid, na_sid] = np.round(trimmed_mean(knn_betas), ndigit)
+        
+        all_na_rows_failed = len(input_df[input_df.isnull().all(axis=1)].index)
+        if verbose:
+            print("There are still %d ROWs with all missing values (failed to impute)." % all_na_rows_failed, file=sys.stderr)
+        if drop_all_na:
+            input_df.dropna(how='all', inplace=True)
         return input_df
